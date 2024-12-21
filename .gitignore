@@ -5,6 +5,6 @@ obj/
 .DS_Store
 .mono/
 
- Verify
+# Verify
 *.received.*
 *.received/
