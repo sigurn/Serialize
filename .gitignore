@@ -4,3 +4,7 @@ obj/
 .vscode/
 .DS_Store
 .mono/
+
+ Verify
+*.received.*
+*.received/
