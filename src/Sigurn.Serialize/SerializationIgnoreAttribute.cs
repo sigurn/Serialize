@@ -6,6 +6,6 @@ namespace Sigurn.Serialize;
 /// The attribute which allows to exclude some class properties from the generated automatic serializer.
 /// </summary>
 [AttributeUsage(AttributeTargets.Property)]
-public sealed class SerializationIgnoreAttribute : Attribute
+public sealed class SerializeIgnoreAttribute : Attribute
 {
 }

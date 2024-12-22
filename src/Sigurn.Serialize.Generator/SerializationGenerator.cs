@@ -17,148 +17,155 @@ namespace Sigurn.Serialize.Generator
     public class SerializationGenerator : IIncrementalGenerator
     {
         private const string _generateSerializerAttributeName = "Sigurn.Serialize.GenerateSerializerAttribute";
-        private const string _serializationIgnoreAttributeName = "Sigurn.Serialize.SerializationIgnoreAttribute";
+        private const string _serializationIgnoreAttributeName = "Sigurn.Serialize.SerializeIgnoreAttribute";
+        private const string _serializationOrderIdAttributeName = "Sigurn.Serialize.SerializeOrderAttribute";
 
         /// <inheritdoc/>
         public void Initialize(IncrementalGeneratorInitializationContext context)
         {
-            IncrementalValuesProvider<TypeDeclarationSyntax> typeDeclarations = 
-            context.SyntaxProvider.CreateSyntaxProvider(
-                predicate: (s, _) => IsSyntaxTargetForGeneration(s), 
-                transform: (ctx, _) => GetSemanticTargetForGeneration(ctx))
-                .Where(m => !(m is null));
+            IncrementalValuesProvider<TargetTypeInfo> typesToGenerateSerializer = 
+            context.SyntaxProvider.ForAttributeWithMetadataName
+            (
+                _generateSerializerAttributeName,
+                predicate: (s, _) => true,
+                transform: (ctx, _) => GetTargetTypeInfo(ctx.SemanticModel, ctx.TargetNode)
+            )
+            .Where(m => !(m is null));
+            
+            IncrementalValueProvider<(Compilation, ImmutableArray<TargetTypeInfo>)> compilationAndClasses 
+                = context.CompilationProvider.Combine(typesToGenerateSerializer.Collect());
 
-            IncrementalValueProvider<(Compilation, ImmutableArray<TypeDeclarationSyntax>)> compilationAndClasses 
-                = context.CompilationProvider.Combine(typeDeclarations.Collect());
-
-            context.RegisterSourceOutput(compilationAndClasses, (spc, source) => 
-            {
-                if (!source.Item2.IsDefaultOrEmpty)
-                    Execute(source.Item1, source.Item2, spc);
-            });
+            context.RegisterSourceOutput(typesToGenerateSerializer,
+                (spc, source) => Execute(source, spc));
         }
 
-        private void Execute(Compilation compilation, ImmutableArray<TypeDeclarationSyntax> types, SourceProductionContext context)
+        private void Execute(TargetTypeInfo tti, SourceProductionContext context)
         {
-            if (types.IsDefaultOrEmpty)
-                return;
+            StringBuilder toStreamStringBuilder = new StringBuilder();
+            StringBuilder fromStreamStringBuilder = new StringBuilder();
 
-            IEnumerable<TypeDeclarationSyntax> distinctClasses = types.Distinct();
+            toStreamStringBuilder.Append($"    public async Task ToStreamAsync(Stream stream, {tti.TypeNamespace}.{tti.TypeName} value, SerializationContext context, CancellationToken cancellationToken)\n");
+            toStreamStringBuilder.Append( "    {\n");
+            toStreamStringBuilder.Append( "        ArgumentNullException.ThrowIfNull(stream);\n");
+            toStreamStringBuilder.Append( "        ArgumentNullException.ThrowIfNull(context);\n");
+            toStreamStringBuilder.Append( "\n");
 
-            foreach(var t in types)
+            fromStreamStringBuilder.Append($"    public async Task<{tti.TypeNamespace}.{tti.TypeName}> FromStreamAsync(Stream stream, SerializationContext context, CancellationToken cancellationToken)\n");
+            fromStreamStringBuilder.Append( "    {\n");
+            fromStreamStringBuilder.Append( "        ArgumentNullException.ThrowIfNull(stream);\n");
+            fromStreamStringBuilder.Append( "        ArgumentNullException.ThrowIfNull(context);\n");
+            fromStreamStringBuilder.Append( "\n");
+            fromStreamStringBuilder.Append($"        return new {tti.TypeNamespace}.{tti.TypeName}()\n");
+            fromStreamStringBuilder.Append( "        {\n");
+
+            foreach(var p in tti.Properties.OrderBy(x => x.OrderId))
             {
-                var model = compilation.GetSemanticModel(t.SyntaxTree);
+                toStreamStringBuilder.Append($"        await Serializer.ToStreamAsync<{p.Type}>(stream, value.{p.Name}, context, cancellationToken);\n");
+                fromStreamStringBuilder.Append($"            {p.Name} = await Serializer.FromStreamAsync<{p.Type}>(stream, context, cancellationToken),\n");
+            }
+        
+            toStreamStringBuilder.Append( "    }\n");
 
-                var ns = t.Ancestors()
+            fromStreamStringBuilder.Append( "        };\n");
+            fromStreamStringBuilder.Append( "    }\n");
+
+            StringBuilder sb = new StringBuilder();
+
+            sb.Append($"using System;\n");
+            sb.Append($"using System.IO;\n");
+            sb.Append($"using System.Threading;\n");
+            sb.Append($"using System.Runtime.CompilerServices;\n");
+            sb.Append("\n");
+            sb.Append($"using Sigurn.Serialize;\n");
+            sb.Append("\n");
+            sb.Append($"namespace {tti.SerializerNamespace};\n");
+            sb.Append("\n");
+            sb.Append($"internal sealed class {tti.SerializerName} : ITypeSerializer<{tti.TypeNamespace}.{tti.TypeName}>\n");
+            sb.Append("{\n");
+
+            sb.Append($"    [ModuleInitializer]\n");
+            sb.Append($"    internal static void Initializer()\n");
+            sb.Append( "    {\n");
+            sb.Append($"        Serializer.RegisterSerializer<{tti.TypeNamespace}.{tti.TypeName}>(() => new {tti.SerializerName}());\n");
+            sb.Append( "    }\n");
+            sb.Append("\n");
+
+            sb.Append($"    private {tti.SerializerName}()\n");
+            sb.Append( "    {\n");
+            sb.Append( "    }\n");
+            sb.Append("\n");
+
+            sb.Append(toStreamStringBuilder);
+            sb.Append("\n");
+            sb.Append(fromStreamStringBuilder);
+
+            sb.Append("}\n");
+
+            context.AddSource($"{tti.SerializerName}.g.cs", SourceText.From(sb.ToString(), Encoding.UTF8));
+        }
+
+        private TargetTypeInfo GetTargetTypeInfo(SemanticModel semanticModel, SyntaxNode syntaxNode)
+        {            
+            if (!(syntaxNode is TypeDeclarationSyntax tds)) return null;
+
+            var tti = new TargetTypeInfo();
+            tti.TypeName = tds.Identifier.Text;
+
+            var ns = tds.Ancestors()
                     .OfType<BaseNamespaceDeclarationSyntax>()
                     .FirstOrDefault();
 
-                var fullTypeName = GetFullTypeName(t);
+            tti.TypeNamespace = GetFullNamespace(ns);
 
-                var publicProps = t.Members.OfType<PropertyDeclarationSyntax>()
-                    .Where(x => x.Modifiers.Any(m => m.IsKind(SyntaxKind.PublicKeyword) || m.IsKind(SyntaxKind.InternalKeyword)))
-                    .Where(x => !HasAttribute(x, model, _serializationIgnoreAttributeName))
-                    .Where(x =>
-                    {
-                        var getAccessor = x.AccessorList.Accessors.Where(a => a.IsKind(SyntaxKind.GetAccessorDeclaration)).FirstOrDefault();                        
-                        if (getAccessor is null) return false;
-                        if (getAccessor.Modifiers.Count != 0 && 
-                            !getAccessor.Modifiers.Any(m => m.IsKind(SyntaxKind.PublicKeyword)) &&
-                            !getAccessor.Modifiers.Any(m => m.IsKind(SyntaxKind.InternalKeyword))) return false;
+            tti.SerializerNamespace = $"{tti.TypeNamespace}.Serializers";
+            tti.SerializerName = $"{tti.TypeName}Serializer";
 
-                        var setAccessor = x.AccessorList.Accessors.Where(a => a.IsKind(SyntaxKind.SetAccessorDeclaration)).FirstOrDefault();
-                        var initAccessor = x.AccessorList.Accessors.Where(a => a.IsKind(SyntaxKind.InitAccessorDeclaration)).FirstOrDefault();
-                        if (setAccessor is null && initAccessor is null) return false;
-                        if (setAccessor != null && setAccessor.Modifiers.Count != 0 && 
-                            !setAccessor.Modifiers.Any(m => m.IsKind(SyntaxKind.PublicKeyword)) &&
-                            !setAccessor.Modifiers.Any(m => m.IsKind(SyntaxKind.InternalKeyword))) return false;
-
-                        if (initAccessor != null && initAccessor.Modifiers.Count != 0 && 
-                            !initAccessor.Modifiers.Any(m => m.IsKind(SyntaxKind.PublicKeyword)) &&
-                            !initAccessor.Modifiers.Any(m => m.IsKind(SyntaxKind.InternalKeyword))) return false;
-
-                        return true;
-                    });
-
-                StringBuilder toStreamStringBuilder = new StringBuilder();
-                StringBuilder fromStreamStringBuilder = new StringBuilder();
-
-                toStreamStringBuilder.Append($"    public async Task ToStreamAsync(Stream stream, {fullTypeName} value, SerializationContext context, CancellationToken cancellationToken)\n");
-                toStreamStringBuilder.Append( "    {\n");
-                toStreamStringBuilder.Append( "        ArgumentNullException.ThrowIfNull(stream);\n");
-                toStreamStringBuilder.Append( "        ArgumentNullException.ThrowIfNull(context);\n");
-                toStreamStringBuilder.Append( "\n");
-
-                fromStreamStringBuilder.Append($"    public async Task<{fullTypeName}> FromStreamAsync(Stream stream, SerializationContext context, CancellationToken cancellationToken)\n");
-                fromStreamStringBuilder.Append( "    {\n");
-                fromStreamStringBuilder.Append( "        ArgumentNullException.ThrowIfNull(stream);\n");
-                fromStreamStringBuilder.Append( "        ArgumentNullException.ThrowIfNull(context);\n");
-                fromStreamStringBuilder.Append( "\n");
-                fromStreamStringBuilder.Append($"        return new {fullTypeName}()\n");
-                fromStreamStringBuilder.Append( "        {\n");
-
-                foreach(var p in publicProps)
+            var publicProps = tds.Members.OfType<PropertyDeclarationSyntax>()
+                .Where(x => x.Modifiers.Any(m => m.IsKind(SyntaxKind.PublicKeyword) || m.IsKind(SyntaxKind.InternalKeyword)))
+                .Where(x => !HasAttribute(x, semanticModel, _serializationIgnoreAttributeName))
+                .Where(x =>
                 {
-                    var typeSymbol = model.GetTypeInfo(p.Type).Type;
-                    toStreamStringBuilder.Append($"        await Serializer.ToStreamAsync<{typeSymbol}>(stream, value.{p.Identifier.Text}, context, cancellationToken);\n");
-                    fromStreamStringBuilder.Append($"            {p.Identifier.Text} = await Serializer.FromStreamAsync<{typeSymbol}>(stream, context, cancellationToken),\n");
-                }
-            
-                toStreamStringBuilder.Append( "    }\n");
+                    var getAccessor = x.AccessorList.Accessors.Where(a => a.IsKind(SyntaxKind.GetAccessorDeclaration)).FirstOrDefault();                        
+                    if (getAccessor is null) return false;
+                    if (getAccessor.Modifiers.Count != 0 && 
+                        !getAccessor.Modifiers.Any(m => m.IsKind(SyntaxKind.PublicKeyword)) &&
+                        !getAccessor.Modifiers.Any(m => m.IsKind(SyntaxKind.InternalKeyword))) return false;
 
-                fromStreamStringBuilder.Append( "        };\n");
-                fromStreamStringBuilder.Append( "    }\n");
+                    var setAccessor = x.AccessorList.Accessors.Where(a => a.IsKind(SyntaxKind.SetAccessorDeclaration)).FirstOrDefault();
+                    var initAccessor = x.AccessorList.Accessors.Where(a => a.IsKind(SyntaxKind.InitAccessorDeclaration)).FirstOrDefault();
+                    if (setAccessor is null && initAccessor is null) return false;
+                    if (setAccessor != null && setAccessor.Modifiers.Count != 0 && 
+                        !setAccessor.Modifiers.Any(m => m.IsKind(SyntaxKind.PublicKeyword)) &&
+                        !setAccessor.Modifiers.Any(m => m.IsKind(SyntaxKind.InternalKeyword))) return false;
 
-                StringBuilder sb = new StringBuilder();
-                var serializerClassName = $"{t.Identifier.Text}Serializer";
+                    if (initAccessor != null && initAccessor.Modifiers.Count != 0 && 
+                        !initAccessor.Modifiers.Any(m => m.IsKind(SyntaxKind.PublicKeyword)) &&
+                        !initAccessor.Modifiers.Any(m => m.IsKind(SyntaxKind.InternalKeyword))) return false;
 
-                sb.Append($"using System;\n");
-                sb.Append($"using System.IO;\n");
-                sb.Append($"using System.Threading;\n");
-                sb.Append($"using System.Runtime.CompilerServices;\n");
-                sb.Append("\n");
-                sb.Append($"using Sigurn.Serialize;\n");
-                sb.Append("\n");
-                sb.Append($"namespace {ns.Name}.Serializers;\n");
-                sb.Append("\n");
-                sb.Append($"internal sealed class {serializerClassName} : ITypeSerializer<{fullTypeName}>\n");
-                sb.Append("{\n");
+                    return true;
+                });
 
-                sb.Append($"    [ModuleInitializer]\n");
-                sb.Append($"    internal static void Initializer()\n");
-                sb.Append( "    {\n");
-                sb.Append($"        Serializer.RegisterSerializer<{fullTypeName}>(() => new {serializerClassName}());\n");
-                sb.Append( "    }\n");
-                sb.Append("\n");
+            foreach(var p in publicProps)
+            {
+                var typeSymbol = semanticModel.GetTypeInfo(p.Type).Type;
+                var pi = new TypePropertyInfo();
+                pi.Name = p.Identifier.Text;
+                pi.Type = typeSymbol.ToString();
 
-                sb.Append($"    private {serializerClassName}()\n");
-                sb.Append( "    {\n");
-                sb.Append( "    }\n");
-                sb.Append("\n");
+                var orderAttr = GetAttribute(p, semanticModel, _serializationOrderIdAttributeName);
+                if (orderAttr != null && orderAttr.ArgumentList.Arguments.Count != 0)
+                {
+                    var attrArg = orderAttr.ArgumentList.Arguments[0];
 
-                sb.Append(toStreamStringBuilder);
-                sb.Append("\n");
-                sb.Append(fromStreamStringBuilder);
+                    var constantValue = semanticModel.GetConstantValue(attrArg.Expression);
+                    if (constantValue.HasValue)
+                        pi.OrderId = (int)constantValue.Value;
+                } 
 
-                sb.Append("}\n");
-
-                context.AddSource($"{t.Identifier.Text}Serializer.g.cs", SourceText.From(sb.ToString(), Encoding.UTF8));
+                tti.Properties.Add(pi);
             }
-        }
 
-        private static bool IsSyntaxTargetForGeneration(SyntaxNode node)
-        {
-            return node is TypeDeclarationSyntax tds && tds.AttributeLists.Count > 0;
-        }
-
-        private TypeDeclarationSyntax GetSemanticTargetForGeneration(GeneratorSyntaxContext context)
-        {            
-            var tds = (TypeDeclarationSyntax)context.Node;
-
-            if (HasAttribute(tds, context.SemanticModel, _generateSerializerAttributeName))
-                return tds;
-
-            return null;
+            return tti;
         }
 
         private bool HasAttribute(MemberDeclarationSyntax memberDeclarartion, SemanticModel model, string fullAttrName)
@@ -181,6 +188,28 @@ namespace Sigurn.Serialize.Generator
             }
 
             return false;
+        }
+
+        private AttributeSyntax GetAttribute(MemberDeclarationSyntax memberDeclarartion, SemanticModel model, string fullAttrName)
+        {
+            foreach (AttributeListSyntax attributeListSyntax in memberDeclarartion.AttributeLists)
+            {
+                foreach (AttributeSyntax attributeSyntax in attributeListSyntax.Attributes)
+                {
+                    var si = model.GetSymbolInfo(attributeSyntax);
+                    var attributeSymbol = si.Symbol;
+                    if (attributeSymbol == null)
+                        continue;
+
+                    INamedTypeSymbol attributeContainingTypeSymbol = attributeSymbol.ContainingType;
+                    string fullName = attributeContainingTypeSymbol.ToDisplayString();
+
+                    if (fullName == fullAttrName)
+                        return attributeSyntax;
+                }
+            }
+
+            return null;
         }
 
         private static string GetFullTypeName(TypeDeclarationSyntax typeDeclaration)

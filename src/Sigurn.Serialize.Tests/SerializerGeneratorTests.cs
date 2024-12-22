@@ -56,9 +56,10 @@ namespace MyCode
 
         public long Prop7 { get; private set; }
 
+        [SerializeOrder(-1)]
         internal DateTime Prop8 { get; set; }
 
-        [SerializationIgnore]
+        [SerializeIgnore]
         public decimal Prop9 { get; set; }
 
         public void TestMethod()
