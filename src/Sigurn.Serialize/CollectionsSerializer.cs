@@ -24,6 +24,10 @@ class CollectionsSerializer : IGeneralSerializer
 
     public async Task<object> FromStreamAsync(Stream stream, Type type, SerializationContext context, CancellationToken cancellationToken)
     {
+        ArgumentNullException.ThrowIfNull(stream);
+        ArgumentNullException.ThrowIfNull(type);
+        ArgumentNullException.ThrowIfNull(cancellationToken);
+
         if (type.IsArray)
         {
             var elementType = type.GetElementType() ?? throw new SerializationException("Type of array element cannot be null");
@@ -70,6 +74,7 @@ class CollectionsSerializer : IGeneralSerializer
         ArgumentNullException.ThrowIfNull(stream);
         ArgumentNullException.ThrowIfNull(type);
         ArgumentNullException.ThrowIfNull(value);
+        ArgumentNullException.ThrowIfNull(cancellationToken);
         
         if (type.IsArray)
         {

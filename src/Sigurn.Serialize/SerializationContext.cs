@@ -2,7 +2,7 @@ using System.Text;
 
 namespace Sigurn.Serialize;
 
-public record SerializationContext
+public record class SerializationContext
 {
     public ITypeSerializer? FindTypeSerializer(Type type)
     {

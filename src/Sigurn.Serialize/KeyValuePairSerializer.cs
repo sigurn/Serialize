@@ -16,6 +16,7 @@ class KeyValuePairSerializer : IGeneralSerializer
         ArgumentNullException.ThrowIfNull(stream);
         ArgumentNullException.ThrowIfNull(type);
         ArgumentNullException.ThrowIfNull(context);
+        ArgumentNullException.ThrowIfNull(cancellationToken);
 
         if (!IsTypeSupported(type))
             throw new SerializationException($"This serializer does not support type {type}");
@@ -37,6 +38,7 @@ class KeyValuePairSerializer : IGeneralSerializer
         ArgumentNullException.ThrowIfNull(stream);
         ArgumentNullException.ThrowIfNull(type);
         ArgumentNullException.ThrowIfNull(context);
+        ArgumentNullException.ThrowIfNull(cancellationToken);
 
         if (!IsTypeSupported(type))
             throw new SerializationException($"This serializer does not support type {type}");
@@ -46,6 +48,7 @@ class KeyValuePairSerializer : IGeneralSerializer
 
         var keyProp = type.GetProperty("Key") ?? 
             throw new SerializationException($"Cannot get Key property from type {type}");
+            
         var valueProp = type.GetProperty("Value") ?? 
             throw new SerializationException($"Cannot get Value property from type {type}");
 

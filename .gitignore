@@ -4,6 +4,8 @@ obj/
 .vscode/
 .DS_Store
 .mono/
+nuget/
+artifacts/
 
 # Verify
 *.received.*

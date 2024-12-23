@@ -42,8 +42,6 @@ class StandardTypeSerializer<T> : ITypeSerializer<T>
 
 class StringSerializer : ITypeSerializer<string>
 {
-    private static readonly ByteOrder _converterByteOrder = BitConverter.IsLittleEndian ? ByteOrder.LittleEndian : ByteOrder.BigEndian;
-
     public async Task<string> FromStreamAsync(Stream stream, SerializationContext context, CancellationToken cancellationToken)
     {
         var buf = new byte[await Serializer.FromStreamAsync<int>(stream, context, cancellationToken)];
@@ -64,8 +62,6 @@ class StringSerializer : ITypeSerializer<string>
 
 class GuidSerializer : ITypeSerializer<Guid>
 {
-    private static readonly ByteOrder _converterByteOrder = BitConverter.IsLittleEndian ? ByteOrder.LittleEndian : ByteOrder.BigEndian;
-
     public async Task<Guid> FromStreamAsync(Stream stream, SerializationContext context, CancellationToken cancellationToken)
     {
         var buf = new byte[16];
@@ -87,8 +83,6 @@ class GuidSerializer : ITypeSerializer<Guid>
 
 class VersionSerializer : ITypeSerializer<Version>
 {
-    private static readonly ByteOrder _converterByteOrder = BitConverter.IsLittleEndian ? ByteOrder.LittleEndian : ByteOrder.BigEndian;
-
     public async Task<Version> FromStreamAsync(Stream stream, SerializationContext context, CancellationToken cancellationToken)
     {
         var major = await Serializer.FromStreamAsync<int>(stream, context, cancellationToken);
@@ -116,8 +110,6 @@ class VersionSerializer : ITypeSerializer<Version>
 
 class DateSerializer : ITypeSerializer<DateOnly>
 {
-    private static readonly ByteOrder _converterByteOrder = BitConverter.IsLittleEndian ? ByteOrder.LittleEndian : ByteOrder.BigEndian;
-
     public async Task<DateOnly> FromStreamAsync(Stream stream, SerializationContext context, CancellationToken cancellationToken)
     {
         var year = await Serializer.FromStreamAsync<short>(stream, context, cancellationToken);
@@ -137,8 +129,6 @@ class DateSerializer : ITypeSerializer<DateOnly>
 
 class TimeSerializer : ITypeSerializer<TimeOnly>
 {
-    private static readonly ByteOrder _converterByteOrder = BitConverter.IsLittleEndian ? ByteOrder.LittleEndian : ByteOrder.BigEndian;
-
     public async Task<TimeOnly> FromStreamAsync(Stream stream, SerializationContext context, CancellationToken cancellationToken)
     {
         long ticks = await Serializer.FromStreamAsync<long>(stream, context, cancellationToken);

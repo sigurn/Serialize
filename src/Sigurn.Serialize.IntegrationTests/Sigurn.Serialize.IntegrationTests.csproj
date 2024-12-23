@@ -9,13 +9,11 @@
     <IsTestProject>true</IsTestProject>
 
     <EmitCompilerGeneratedFiles>true</EmitCompilerGeneratedFiles>
-    <!--CompilerGeneratedFilesOutputPath>Generated</CompilerGeneratedFilesOutputPath-->
+    <RestorePackagesPath>$(MSBuildProjectDirectory)/nuget/cache</RestorePackagesPath>
   </PropertyGroup>
 
   <ItemGroup>
-    <ProjectReference Include="..\Sigurn.Serialize.Generator\Sigurn.Serialize.Generator.csproj"
-                      OutputItemType="Analyzer" ReferenceOutputAssembly="false" />
-    <ProjectReference Include="..\Sigurn.Serialize\Sigurn.Serialize.csproj" />
+    <PackageReference Include="Sigurn.Serialize" Version="*" />
   </ItemGroup>
 
   <ItemGroup>
@@ -23,16 +21,19 @@
     <PackageReference Include="coverlet.collector" Version="6.0.0" />
     <PackageReference Include="xunit" Version="2.5.3" />
     <PackageReference Include="xunit.runner.visualstudio" Version="2.5.3" />
-    <!--PackageReference Include="Microsoft.CodeAnalysis.CSharp" Version="4.9.2" PrivateAssets="all" />
-    <PackageReference Include="Microsoft.CodeAnalysis.Analyzers" Version="3.3.4" PrivateAssets="all" /-->
   </ItemGroup>
 
   <ItemGroup>
     <Using Include="Xunit" />
   </ItemGroup>
 
-  <ItemGroup>
-    <Analyzer Include="..\Sigurn.Serialize.Generator\bin\Debug\netstandard2.0\Sigurn.Serialize.Generator.dll" />
-  </ItemGroup>
+  <Target Name="DeleteRestoredPackage" BeforeTargets="Restore">
+    <RemoveDir Condition="Exists($(RestorePackagesPath)/sigurn.serialize)"
+               Directories="$(RestorePackagesPath)/sigurn.serialize" />
+  </Target>
 
+  <Target Name="CleanLocalNuGetCache" AfterTargets="Clean">
+    <RemoveDir Condition="Exists($(RestorePackagesPath))"
+               Directories="$(RestorePackagesPath)" />
+  </Target>
 </Project>

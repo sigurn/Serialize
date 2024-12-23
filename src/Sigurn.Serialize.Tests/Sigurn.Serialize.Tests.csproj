@@ -22,8 +22,8 @@
   </ItemGroup>
 
   <ItemGroup>
-    <ProjectReference Include="../Sigurn.Serialize/Sigurn.Serialize.csproj" Version="6.0.0" />
-    <ProjectReference Include="../Sigurn.Serialize.Generator/Sigurn.Serialize.Generator.csproj" Version="6.0.0" />
+    <ProjectReference Include="../Sigurn.Serialize/Sigurn.Serialize.csproj" />
+    <ProjectReference Include="../Sigurn.Serialize.Generator/Sigurn.Serialize.Generator.csproj" />
   </ItemGroup>
 
   <!--ItemGroup>
