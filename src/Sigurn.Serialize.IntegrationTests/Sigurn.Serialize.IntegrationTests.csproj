@@ -13,7 +13,7 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <PackageReference Include="Sigurn.Serialize" Version="*" />
+    <PackageReference Include="Sigurn.Serialize" Version="*-*" />
   </ItemGroup>
 
   <ItemGroup>
@@ -28,12 +28,12 @@
   </ItemGroup>
 
   <Target Name="DeleteRestoredPackage" BeforeTargets="Restore">
-    <RemoveDir Condition="Exists($(RestorePackagesPath)/sigurn.serialize)"
+    <RemoveDir Condition="Exists('$(RestorePackagesPath)/sigurn.serialize')"
                Directories="$(RestorePackagesPath)/sigurn.serialize" />
   </Target>
 
   <Target Name="CleanLocalNuGetCache" AfterTargets="Clean">
-    <RemoveDir Condition="Exists($(RestorePackagesPath))"
+    <RemoveDir Condition="Exists('$(RestorePackagesPath)')"
                Directories="$(RestorePackagesPath)" />
   </Target>
 </Project>

@@ -11,7 +11,7 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <ProjectReference Include="..\Sigurn.Serialize.Generator\Sigurn.Serialize.Generator.csproj" PrivateAssets="all"/>
+    <ProjectReference Include="../Sigurn.Serialize.Generator/Sigurn.Serialize.Generator.csproj" PrivateAssets="all"/>
   </ItemGroup>
 
   <ItemGroup>
@@ -46,12 +46,12 @@
   <Target Name="CopyNuGetPackage" AfterTargets="Pack">
     <!-- Get the generated .nupkg file -->
     <ItemGroup>
-      <GeneratedPackage Include="$(PackageOutputPath)\$(PackageId).$(PackageVersion).nupkg" />
+      <GeneratedPackage Include="$(PackageOutputPath)/$(PackageId).$(PackageVersion).nupkg" />
     </ItemGroup>
 
     <!-- Specify the destination directory -->
     <PropertyGroup>
-      <CopyDestination>$(MSBuildProjectDirectory)\..\artifacts</CopyDestination>
+      <CopyDestination>$(MSBuildProjectDirectory)/../artifacts</CopyDestination>
     </PropertyGroup>
 
     <!-- Create the destination directory -->
@@ -62,8 +62,8 @@
   </Target>
 
   <Target Name="RemoveArtifacts" BeforeTargets="Build">
-    <RemoveDir Condition="Exists($(MSBuildProjectDirectory)\..\artifacts)"
-               Directories="$(MSBuildProjectDirectory)\..\artifacts" />
+    <RemoveDir Condition="Exists('$(MSBuildProjectDirectory)/../artifacts')"
+               Directories="$(MSBuildProjectDirectory)/../artifacts" />
   </Target>
 
 </Project>

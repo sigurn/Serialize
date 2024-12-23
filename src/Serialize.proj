@@ -1,0 +1,43 @@
+<Project DefaultTargets="VSTest">
+    <Target Name="Restore">
+        <MSBuild Projects="Sigurn.Serialize.Generator/Sigurn.Serialize.Generator.csproj"
+                 Targets="Restore" />
+        <MSBuild Projects="Sigurn.Serialize/Sigurn.Serialize.csproj"
+                 Targets="Restore" />
+        <MSBuild Projects="Sigurn.Serialize.Tests/Sigurn.Serialize.Tests.csproj"
+                 Targets="Restore" />
+    </Target>
+
+    <Target Name="Build" DependsOnTargets="Restore">
+        <MSBuild Projects="Sigurn.Serialize.Generator/Sigurn.Serialize.Generator.csproj"
+                 Targets="Build" />
+        <MSBuild Projects="Sigurn.Serialize/Sigurn.Serialize.csproj"
+                 Targets="Build" />
+        <MSBuild Projects="Sigurn.Serialize.Tests/Sigurn.Serialize.Tests.csproj"
+                 Targets="Build" />
+
+        <MSBuild Projects="Sigurn.Serialize.IntegrationTests/Sigurn.Serialize.IntegrationTests.csproj"
+                 Targets="Restore" />
+        <MSBuild Projects="Sigurn.Serialize.IntegrationTests/Sigurn.Serialize.IntegrationTests.csproj"
+                 Targets="Build" />
+    </Target>
+
+    <Target Name="VSTest" DependsOnTargets="Build">
+        <MSBuild Projects="Sigurn.Serialize.Tests/Sigurn.Serialize.Tests.csproj"
+                 Targets="VSTest" />
+        <MSBuild Projects="Sigurn.Serialize.IntegrationTests/Sigurn.Serialize.IntegrationTests.csproj"
+                 Targets="VSTest" />
+    </Target>
+
+    <Target Name="Clean">
+        <MSBuild Projects="Sigurn.Serialize.IntegrationTests/Sigurn.Serialize.IntegrationTests.csproj"
+                 Targets="Clean" />
+        <MSBuild Projects="Sigurn.Serialize.Tests/Sigurn.Serialize.Tests.csproj"
+                 Targets="Clean" />
+        <MSBuild Projects="Sigurn.Serialize/Sigurn.Serialize.csproj"
+                 Targets="Clean" />
+        <MSBuild Projects="Sigurn.Serialize.Generator/Sigurn.Serialize.Generator.csproj"
+                 Targets="Clean" />
+    </Target>
+
+</Project>
