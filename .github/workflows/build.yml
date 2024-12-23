@@ -18,11 +18,20 @@ jobs:
       with:
         dotnet-version: 8.0.x
     - name: Restore dependencies
-      run: dotnet restore src\Sigurn.Serialize.Generator\Sigurn.Serialize.Generator.csproj src\Sigurn.Serialize\Sigurn.Serialize.csproj src\Sigurn.Serialize.Tests\Sigurn.Serialize.Tests.csproj
+      run: |
+        dotnet restore src\Sigurn.Serialize.Generator\Sigurn.Serialize.Generator.csproj
+        dotnet restore src\Sigurn.Serialize\Sigurn.Serialize.csproj
+        dotnet restore src\Sigurn.Serialize.Tests\Sigurn.Serialize.Tests.csproj
     - name: Build Debug
-      run: dotnet build --no-restore src\Sigurn.Serialize.Generator\Sigurn.Serialize.Generator.csproj src\Sigurn.Serialize\Sigurn.Serialize.csproj src\Sigurn.Serialize.Tests\Sigurn.Serialize.Tests.csproj
+      run: |
+        dotnet build --no-restore src\Sigurn.Serialize.Generator\Sigurn.Serialize.Generator.csproj
+        dotnet build --no-restore src\Sigurn.Serialize\Sigurn.Serialize.csproj
+        dotnet build --no-restore src\Sigurn.Serialize.Tests\Sigurn.Serialize.Tests.csproj
     - name: Build Release
-      run: dotnet build --no-restore -c Release src\Sigurn.Serialize.Generator\Sigurn.Serialize.Generator.csproj src\Sigurn.Serialize\Sigurn.Serialize.csproj src\Sigurn.Serialize.Tests\Sigurn.Serialize.Tests.csproj
+      run: |
+        dotnet build --no-restore -c Release src\Sigurn.Serialize.Generator\Sigurn.Serialize.Generator.csproj 
+        dotnet build --no-restore -c Release src\Sigurn.Serialize\Sigurn.Serialize.csproj
+        dotnet build --no-restore -c Release src\Sigurn.Serialize.Tests\Sigurn.Serialize.Tests.csproj
     - name: Test Debug
       run: dotnet test --no-build --verbosity normal src\Sigurn.Serialize.Tests\Sigurn.Serialize.Tests.csproj
     - name: Test Release
