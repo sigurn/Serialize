@@ -1,0 +1,48 @@
+name: build
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  build:
+
+    runs-on: windows-latest
+
+    steps:
+    - uses: actions/checkout@v2
+    - name: Setup .NET 8
+      uses: actions/setup-dotnet@v1
+      with:
+        dotnet-version: 8.0.x
+    - name: Restore dependencies
+      run: |
+        dotnet restore src\Sigurn.Serialize.Generator\Sigurn.Serialize.Generator.csproj
+        dotnet restore src\Sigurn.Serialize\Sigurn.Serialize.csproj
+        dotnet restore src\Sigurn.Serialize.Tests\Sigurn.Serialize.Tests.csproj
+    - name: Build Debug
+      run: |
+        dotnet build --no-restore src\Sigurn.Serialize.Generator\Sigurn.Serialize.Generator.csproj
+        dotnet build --no-restore src\Sigurn.Serialize\Sigurn.Serialize.csproj
+        dotnet build --no-restore src\Sigurn.Serialize.Tests\Sigurn.Serialize.Tests.csproj
+    - name: Build Release
+      run: |
+        dotnet build --no-restore -c Release src\Sigurn.Serialize.Generator\Sigurn.Serialize.Generator.csproj 
+        dotnet build --no-restore -c Release src\Sigurn.Serialize\Sigurn.Serialize.csproj
+        dotnet build --no-restore -c Release src\Sigurn.Serialize.Tests\Sigurn.Serialize.Tests.csproj
+    - name: Test Debug
+      run: dotnet test --no-build --verbosity normal src\Sigurn.Serialize.Tests\Sigurn.Serialize.Tests.csproj
+    - name: Test Release
+      run: dotnet test --no-build --verbosity normal -c Release src\Sigurn.Serialize.Tests\Sigurn.Serialize.Tests.csproj
+    - name: Restore Integration Tests
+      run: dotnet restore src\Sigurn.Serialize.IntegrationTests\Sigurn.Serialize.IntegrationTests.csproj
+    - name: Build Debug Integration Tests
+      run: dotnet build --no-restore src\Sigurn.Serialize.IntegrationTests\Sigurn.Serialize.IntegrationTests.csproj
+    - name: Build Release Integration Tests
+      run: dotnet build --no-restore -c Release src\Sigurn.Serialize.IntegrationTests\Sigurn.Serialize.IntegrationTests.csproj
+    - name: Integration Test Debug
+      run: dotnet test --no-build --verbosity normal src\Sigurn.Serialize.IntegrationTests\Sigurn.Serialize.IntegrationTests.csproj
+    - name: Integration Test Release 
+      run: dotnet test --no-build --verbosity normal -c Release src\Sigurn.Serialize.IntegrationTests\Sigurn.Serialize.IntegrationTests.csproj

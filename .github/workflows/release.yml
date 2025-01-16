@@ -1,0 +1,44 @@
+name: release
+
+on:
+  release:
+    types: [published]
+
+jobs:
+  build:
+
+    runs-on: windows-latest
+
+    steps:
+    - uses: actions/checkout@v2
+    - name: Setup .NET
+      uses: actions/setup-dotnet@v1
+      with:
+        dotnet-version: 8.0.x
+    - name: Restore dependencies
+      run: |
+        dotnet restore src\Sigurn.Serialize.Generator\Sigurn.Serialize.Generator.csproj
+        dotnet restore src\Sigurn.Serialize\Sigurn.Serialize.csproj
+        dotnet restore src\Sigurn.Serialize.Tests\Sigurn.Serialize.Tests.csproj
+    - name: Build Release
+      run: |
+        dotnet build --no-restore -c Release src\Sigurn.Serialize.Generator\Sigurn.Serialize.Generator.csproj
+        dotnet build --no-restore -c Release src\Sigurn.Serialize\Sigurn.Serialize.csproj
+        dotnet build --no-restore -c Release src\Sigurn.Serialize.Tests\Sigurn.Serialize.Tests.csproj
+    - name: Test Release
+      run: dotnet test --no-build --verbosity normal -c Release src\Sigurn.Serialize.Tests\Sigurn.Serialize.Tests.csproj
+    - name: Restore Integration Tests
+      run: dotnet restore src\Sigurn.Serialize.IntegrationTests\Sigurn.Serialize.IntegrationTests.csproj
+    - name: Build Release Integration Tests
+      run: dotnet build --no-restore -c Release src\Sigurn.Serialize.IntegrationTests\Sigurn.Serialize.IntegrationTests.csproj
+    - name: Integration Test Release 
+      run: dotnet test --no-build --verbosity normal -c Release src\Sigurn.Serialize.IntegrationTests\Sigurn.Serialize.IntegrationTests.csproj
+    - name: Publish artifacts
+      uses: softprops/action-gh-release@v1
+      with:
+        files: |
+          src/Sigurn.Serialize/bin/Release/*.nupkg
+          src/Sigurn.Serialize/bin/Release/*.snupkg
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+ 

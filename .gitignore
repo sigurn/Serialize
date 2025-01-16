@@ -1,0 +1,12 @@
+bin/
+obj/
+*.swp
+.vscode/
+.DS_Store
+.mono/
+nuget/
+artifacts/
+
+# Verify
+*.received.*
+*.received/
