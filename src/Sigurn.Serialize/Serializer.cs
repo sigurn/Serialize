@@ -13,7 +13,8 @@ public static class Serializer
     private static readonly List<IGeneralSerializer> _genericSerializers =
     [
         new CollectionsSerializer(),
-        new KeyValuePairSerializer()
+        new KeyValuePairSerializer(),
+        new EnumSerializer()
     ];
 
     static Serializer()
