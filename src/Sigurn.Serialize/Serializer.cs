@@ -281,14 +281,14 @@ public static class Serializer
         var st = typeof(T);
         bool isNullable = false;
         
-        var serializer = FindTypeSerializer(st);
+        var serializer = context.FindTypeSerializer(st);
         if (serializer is null)
         {
             st = Nullable.GetUnderlyingType(st);
             if (st is null)
                 throw new SerializationException($"Cannot find serializer for type '{typeof(T)}'");
 
-            serializer = FindTypeSerializer(st) ?? 
+            serializer = context.FindTypeSerializer(st) ?? 
                 throw new SerializationException($"Cannot find serializer for type neither '{typeof(T)}' nor '{st}'");
 
             isNullable = true;
@@ -328,14 +328,14 @@ public static class Serializer
         var st = type;
         bool isNullable = false;
 
-        var serializer = FindTypeSerializer(st);
+        var serializer = context.FindTypeSerializer(st);
         if (serializer is null)
         {
             st = Nullable.GetUnderlyingType(st);
             if (st is null)
                 throw new SerializationException($"Cannot find serializer for type '{type}'");
 
-            serializer = FindTypeSerializer(st) ?? 
+            serializer = context.FindTypeSerializer(st) ?? 
                 throw new SerializationException($"Cannot find serializer for type neither '{type}' nor '{st}'");
 
             isNullable = true;
