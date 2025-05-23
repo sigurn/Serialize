@@ -197,7 +197,7 @@ public class MyCustomType
 }
 ```
 
-Later when you need the serializer for your local serialization context you can get the serializer instance using `Serilizer.GetSerializer<T>()' method.
+Later when you need the serializer for your local serialization context you can get the serializer instance using `Serilizer.GetSerializer<T>()` method.
 ```C#
 var mySerializer = Serializer.GetSerializer<MyCustomType>();
 var context = SerializationContext.Default with
