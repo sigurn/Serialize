@@ -9,6 +9,7 @@ namespace Sigurn.Serialize;
 public static class Serializer
 {
     private static readonly Dictionary<Type, Lazy<ITypeSerializer>> _typeSerializers = [];
+    private static readonly Dictionary<Type, Lazy<ITypeSerializer>> _globalTypeSerializers = [];
 
     private static readonly List<IGeneralSerializer> _genericSerializers =
     [
@@ -19,10 +20,10 @@ public static class Serializer
 
     static Serializer()
     {
-        RegisterSerializer(() => new StandardTypeSerializer<bool>(1, x => x ? new byte[]{1} : new byte[]{0}, x => x[0] != 0));
+        RegisterSerializer(() => new StandardTypeSerializer<bool>(1, x => x ? [1] : [0], x => x[0] != 0));
 
-        RegisterSerializer(() => new StandardTypeSerializer<byte>(1, x => new byte[]{x}, x => x[0]));
-        RegisterSerializer(() => new StandardTypeSerializer<sbyte>(1, x => new byte[]{(byte)x}, x => (sbyte)x[0]));
+        RegisterSerializer(() => new StandardTypeSerializer<byte>(1, x => [x], x => x[0]));
+        RegisterSerializer(() => new StandardTypeSerializer<sbyte>(1, x => [(byte)x], x => (sbyte)x[0]));
 
         RegisterSerializer(() => new StandardTypeSerializer<short>(2, x => BitConverter.GetBytes(x), x => BitConverter.ToInt16(x)));
         RegisterSerializer(() => new StandardTypeSerializer<ushort>(2, x => BitConverter.GetBytes(x), x => BitConverter.ToUInt16(x)));
@@ -61,57 +62,79 @@ public static class Serializer
     }
 
     /// <summary>
-    /// Registers global serializer which will be available application wide for all serializations.
+    /// Registers serializer.
     /// </summary>
     /// <typeparam name="T">Type for which the serializer will be used.</typeparam>
     /// <param name="serializer">Instance of the type serializer.</param>
-    public static void RegisterSerializer<T>(ITypeSerializer<T> serializer)
+    /// <param name="useGlobally">Defines if the serializer is available application wide for all serializations.</param>
+    public static void RegisterSerializer<T>(ITypeSerializer<T> serializer, bool useGlobally = true)
     {
         ArgumentNullException.ThrowIfNull(serializer);
 
-        lock(_typeSerializers)
-            _typeSerializers.Add(typeof(T), new Lazy<ITypeSerializer>(serializer));
+        var lazyInstance = new Lazy<ITypeSerializer>(serializer);
+
+        lock (_typeSerializers)
+            _typeSerializers.Add(typeof(T), lazyInstance);
+
+        if (useGlobally)
+            lock (_globalTypeSerializers)
+                _globalTypeSerializers.Add(typeof(T), lazyInstance);
     }
 
     /// <summary>
-    /// Registers global serializer which will be available application wide for all serializations.
+    /// Registers serializer.
     /// </summary>
     /// <typeparam name="T">Type for which the serializer will be used.</typeparam>
     /// <param name="serializerFactory">Serializer factory. This factory will be used to create instance on the type serializer.</param>
+    /// <param name="useGlobally">Defines if the serializer is available application wide for all serializations.</param>
     /// <remarks>
     /// The serializer will be created on the first use and will stay forever.
     /// </remarks>
-    public static void RegisterSerializer<T>(Func<ITypeSerializer<T>> serializerFactory)
+    public static void RegisterSerializer<T>(Func<ITypeSerializer<T>> serializerFactory, bool useGlobally = true)
     {
         ArgumentNullException.ThrowIfNull(serializerFactory);
 
-        lock(_typeSerializers)
-            _typeSerializers.Add(typeof(T), new Lazy<ITypeSerializer>(serializerFactory));
+        var lazyInstance = new Lazy<ITypeSerializer>(serializerFactory);
+
+        lock (_typeSerializers)
+            _typeSerializers.Add(typeof(T), lazyInstance);
+            
+        if (useGlobally)
+            lock (_globalTypeSerializers)
+                _globalTypeSerializers.Add(typeof(T), lazyInstance);
     }
 
     /// <summary>
-    /// Registers global serializer which will be available application wide for all serializations.
+    /// Registers serializer.
     /// </summary>
     /// <typeparam name="T">Type for which the serializer will be used.</typeparam>
     /// <param name="serializerFactory">Serializer factory. This factory will be used to create instance on the type serializer.</param>
+    /// <param name="useGlobally">Defines if the serializer is available application wide for all serializations.</param>
     /// <exception cref="ArgumentException">The exception thrown when there are problems with the arguments.</exception>
-    public static void RegisterSerializer<T>(Func<ITypeSerializer> serializerFactory)
+    public static void RegisterSerializer<T>(Func<ITypeSerializer> serializerFactory, bool useGlobally = true)
     {
         ArgumentNullException.ThrowIfNull(serializerFactory);
 
         if (typeof(T) == typeof(object))
             throw new ArgumentException("Type serializer cannot be used for serializing objects. Please use GeneralSerializer for that.");
 
-        lock(_typeSerializers)
-            _typeSerializers.Add(typeof(T), new Lazy<ITypeSerializer>(serializerFactory));
+        var lazyInstance = new Lazy<ITypeSerializer>(serializerFactory);
+
+        lock (_typeSerializers)
+            _typeSerializers.Add(typeof(T), lazyInstance);
+
+        if (useGlobally)
+            lock (_globalTypeSerializers)
+                _globalTypeSerializers.Add(typeof(T), lazyInstance);
     }
 
     /// <summary>
-    /// Registers global serializer which will be available application wide for all serializations.
+    /// Registers serializer.
     /// </summary>
     /// <param name="serializer">Type serializer instance.</param>
+    /// <param name="useGlobally">Defines if the serializer is available application wide for all serializations.</param>
     /// <exception cref="ArgumentException">The exception thrown when there are problems with the arguments.</exception>
-    public static void RegisterSerializer(ITypeSerializer serializer)
+    public static void RegisterSerializer(ITypeSerializer serializer, bool useGlobally = true)
     {
         ArgumentNullException.ThrowIfNull(serializer);
 
@@ -119,10 +142,16 @@ public static class Serializer
             throw new ArgumentException("Serializer must declare what type it can serialize. Type cannot be null", nameof(serializer));
 
         if (serializer.Type == typeof(object))
-            throw new ArgumentException("Type serializer cannot be used for serializing objects. Please use GenericSerializer for that.");
+            throw new ArgumentException("Type serializer cannot be used for serializing objects. Please use GeneralSerializer for that.");
 
-        lock(_typeSerializers)
-            _typeSerializers.Add(serializer.Type, new Lazy<ITypeSerializer>(serializer));
+        var lazyInstance = new Lazy<ITypeSerializer>(serializer);
+
+        lock (_typeSerializers)
+            _typeSerializers.Add(serializer.Type, lazyInstance);
+
+        if (useGlobally)
+            lock (_globalTypeSerializers)
+                _globalTypeSerializers.Add(serializer.Type, lazyInstance);
     }
 
     /// <summary>
@@ -140,25 +169,43 @@ public static class Serializer
     }
 
     /// <summary>
+    /// Creates serializer instance for the specified type.
+    /// </summary>
+    /// <typeparam name="T">Type for that serializer should be created.</typeparam>
+    /// <returns>Serilizer instance.</returns>
+    /// <exception cref="ArgumentException">The exception thrown if serializer for the specified type is not registered.</exception>
+    /// <remarks>This method allows to get serializer instance which was registered but is not used globally for serialization.
+    /// This allows to register serializers for types but use them in certain serialization context.
+    /// </remarks>
+    public static ITypeSerializer<T> GetSerializer<T>()
+    {
+        lock (_typeSerializers)
+            if (_typeSerializers.TryGetValue(typeof(T), out var factory))
+                return (ITypeSerializer<T>)factory.Value;
+
+        throw new ArgumentException($"Serializer for the type '{typeof(T)}' is not registered.");
+    }
+
+    /// <summary>
     /// Finds serializer for the specified type.
     /// </summary>
     /// <param name="type">Type which has to be serialized.</param>
     /// <returns></returns>
     /// <exception cref="ArgumentNullException">The exception thrown when there are problems with the arguments.</exception>
-    public static ITypeSerializer? FindTypeSerializer(Type type)
+    internal static ITypeSerializer? FindTypeSerializer(Type type)
     {
         if (type is null)
             throw new ArgumentNullException(nameof(type));
 
         if (type.IsAssignableTo(typeof(ISerializable)))
             return new SerializableTypeSerializer(type);
-            
-        lock(_typeSerializers)
-            if (_typeSerializers.TryGetValue(type, out Lazy<ITypeSerializer>? lazySerializer))
+
+        lock (_globalTypeSerializers)
+            if (_globalTypeSerializers.TryGetValue(type, out Lazy<ITypeSerializer>? lazySerializer))
                 return lazySerializer.Value;
 
         ITypeSerializer? serializer = null;
-        lock(_genericSerializers)
+        lock (_genericSerializers)
             serializer = _genericSerializers.Where(x => x.IsTypeSupported(type)).FirstOrDefault();
 
         if (serializer is not null)

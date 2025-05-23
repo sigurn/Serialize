@@ -38,7 +38,7 @@ using System;
 
 namespace MyCode
 {
-    [GenerateSerializer]
+    [GenerateSerializer(true)]
     public class TestClass
     {
         public string Prop1 { get; set; }
@@ -93,6 +93,34 @@ namespace MyCode
 {
     [GenerateSerializer]
     public class EmptyClass
+    {
+    }
+}
+");
+        var diag = inputCompilation.GetDiagnostics().Where(x => x.Severity == DiagnosticSeverity.Error);
+        Assert.Empty(diag);
+
+        SerializationGenerator generator = new SerializationGenerator();
+        GeneratorDriver driver = CSharpGeneratorDriver.Create(generator);
+        driver = driver.RunGenerators(inputCompilation);
+        await Verify(driver);
+    }
+
+    [Fact]
+    public async Task TestDoNotUseGloballySerializer()
+    {
+        Compilation inputCompilation = CreateCompilation(
+@"
+using Sigurn.Serialize;
+using System.Collections.Generic;
+using System.Threading;
+using System.Xml;
+using System;
+
+namespace MyCode
+{
+    [GenerateSerializer(false)]
+    public class TestClass
     {
     }
 }

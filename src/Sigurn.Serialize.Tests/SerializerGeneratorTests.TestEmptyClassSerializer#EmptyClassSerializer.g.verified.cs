@@ -13,7 +13,7 @@ internal sealed class EmptyClassSerializer : ITypeSerializer<MyCode.EmptyClass>
     [ModuleInitializer]
     internal static void Initializer()
     {
-        Serializer.RegisterSerializer<MyCode.EmptyClass>(() => new EmptyClassSerializer());
+        Serializer.RegisterSerializer<MyCode.EmptyClass>(() => new EmptyClassSerializer(), true);
     }
 
     private EmptyClassSerializer()

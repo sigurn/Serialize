@@ -1,6 +1,6 @@
 namespace Sigurn.Serialize.IntegrationTests;
 
-[GenerateSerializer]
+[GenerateSerializer(true)]
 public class TestClass
 {
     public int Prop1 { get; set; }

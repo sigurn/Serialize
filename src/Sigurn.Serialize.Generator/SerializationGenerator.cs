@@ -20,7 +20,7 @@ namespace Sigurn.Serialize.Generator
 {
     readonly record struct TypePropertyInfo(string Name, string Type, int OrderId);
 
-    readonly record struct TargetTypeInfo(string TypeNamespace, string TypeName, string SerializerNamespace, string SerializerName, EquatableArray<TypePropertyInfo> Properties);
+    readonly record struct TargetTypeInfo(string TypeNamespace, string TypeName, string SerializerNamespace, string SerializerName, bool UseGlobally, EquatableArray<TypePropertyInfo> Properties);
 
     /// <summary>
     /// Serializer generator.
@@ -54,43 +54,44 @@ namespace Sigurn.Serialize.Generator
                 toStreamStringBuilder.Append($"    public async Task ToStreamAsync(Stream stream, {tti.TypeNamespace}.{tti.TypeName} value, SerializationContext context, CancellationToken cancellationToken)\n");
             else
                 toStreamStringBuilder.Append($"    public Task ToStreamAsync(Stream stream, {tti.TypeNamespace}.{tti.TypeName} value, SerializationContext context, CancellationToken cancellationToken)\n");
-            toStreamStringBuilder.Append( "    {\n");
-            toStreamStringBuilder.Append( "        ArgumentNullException.ThrowIfNull(stream);\n");
-            toStreamStringBuilder.Append( "        ArgumentNullException.ThrowIfNull(context);\n");
-            toStreamStringBuilder.Append( "\n");
+            toStreamStringBuilder.Append("    {\n");
+            toStreamStringBuilder.Append("        ArgumentNullException.ThrowIfNull(stream);\n");
+            toStreamStringBuilder.Append("        ArgumentNullException.ThrowIfNull(context);\n");
+            toStreamStringBuilder.Append("\n");
 
             if (tti.Properties.Count != 0)
                 fromStreamStringBuilder.Append($"    public async Task<{tti.TypeNamespace}.{tti.TypeName}> FromStreamAsync(Stream stream, SerializationContext context, CancellationToken cancellationToken)\n");
             else
                 fromStreamStringBuilder.Append($"    public Task<{tti.TypeNamespace}.{tti.TypeName}> FromStreamAsync(Stream stream, SerializationContext context, CancellationToken cancellationToken)\n");
-            fromStreamStringBuilder.Append( "    {\n");
-            fromStreamStringBuilder.Append( "        ArgumentNullException.ThrowIfNull(stream);\n");
-            fromStreamStringBuilder.Append( "        ArgumentNullException.ThrowIfNull(context);\n");
-            fromStreamStringBuilder.Append( "\n");
+            fromStreamStringBuilder.Append("    {\n");
+            fromStreamStringBuilder.Append("        ArgumentNullException.ThrowIfNull(stream);\n");
+            fromStreamStringBuilder.Append("        ArgumentNullException.ThrowIfNull(context);\n");
+            fromStreamStringBuilder.Append("\n");
             if (tti.Properties.Count != 0)
                 fromStreamStringBuilder.Append($"        return new {tti.TypeNamespace}.{tti.TypeName}()\n");
             else
                 fromStreamStringBuilder.Append($"        return Task.FromResult(new {tti.TypeNamespace}.{tti.TypeName}()\n");
-            fromStreamStringBuilder.Append( "        {\n");
+            fromStreamStringBuilder.Append("        {\n");
 
-            foreach(var p in tti.Properties.OrderBy(x => x.OrderId))
+            foreach (var p in tti.Properties.OrderBy(x => x.OrderId))
             {
                 toStreamStringBuilder.Append($"        await Serializer.ToStreamAsync<{p.Type}>(stream, value.{p.Name}, context, cancellationToken);\n");
                 fromStreamStringBuilder.Append($"            {p.Name} = await Serializer.FromStreamAsync<{p.Type}>(stream, context, cancellationToken),\n");
             }
-        
+
             if (tti.Properties.Count == 0)
                 toStreamStringBuilder.Append($"        return Task.CompletedTask;\n");
 
-            toStreamStringBuilder.Append( "    }\n");
+            toStreamStringBuilder.Append("    }\n");
 
             if (tti.Properties.Count == 0)
-                fromStreamStringBuilder.Append( "        });\n");
+                fromStreamStringBuilder.Append("        });\n");
             else
-                fromStreamStringBuilder.Append( "        };\n");
-            fromStreamStringBuilder.Append( "    }\n");
+                fromStreamStringBuilder.Append("        };\n");
+            fromStreamStringBuilder.Append("    }\n");
 
             StringBuilder sb = new StringBuilder();
+            var useGlobally = tti.UseGlobally ? "true" : "false";
 
             sb.Append($"using System;\n");
             sb.Append($"using System.IO;\n");
@@ -106,14 +107,14 @@ namespace Sigurn.Serialize.Generator
 
             sb.Append($"    [ModuleInitializer]\n");
             sb.Append($"    internal static void Initializer()\n");
-            sb.Append( "    {\n");
-            sb.Append($"        Serializer.RegisterSerializer<{tti.TypeNamespace}.{tti.TypeName}>(() => new {tti.SerializerName}());\n");
-            sb.Append( "    }\n");
+            sb.Append("    {\n");
+            sb.Append($"        Serializer.RegisterSerializer<{tti.TypeNamespace}.{tti.TypeName}>(() => new {tti.SerializerName}(), {useGlobally});\n");
+            sb.Append("    }\n");
             sb.Append("\n");
 
             sb.Append($"    private {tti.SerializerName}()\n");
-            sb.Append( "    {\n");
-            sb.Append( "    }\n");
+            sb.Append("    {\n");
+            sb.Append("    }\n");
             sb.Append("\n");
 
             sb.Append(toStreamStringBuilder);
@@ -136,6 +137,20 @@ namespace Sigurn.Serialize.Generator
             var typeNamespace = GetFullNamespace(ns);
             var serializerNamespace = $"{typeNamespace}.Serializers";
             var serializerName = $"{typeName}Serializer";
+            var useGlobally = true;
+
+            var generateAttr = GetAttribute(syntaxNode, semanticModel, _generateSerializerAttributeName);
+            if (generateAttr != null && generateAttr.ArgumentList?.Arguments.Count != 0)
+            {
+                var attrArg = generateAttr.ArgumentList?.Arguments[0];
+                if (attrArg is not null)
+                {
+                    var constantValue = semanticModel.GetConstantValue(attrArg.Expression);
+                    if (constantValue.HasValue && constantValue.Value is bool b)
+                        useGlobally = b;
+                }
+            } 
+
 
             var publicProps = syntaxNode.Members.OfType<PropertyDeclarationSyntax>()
                 .Where(x => x.Modifiers.Any(m => m.IsKind(SyntaxKind.PublicKeyword) || m.IsKind(SyntaxKind.InternalKeyword)))
@@ -183,7 +198,7 @@ namespace Sigurn.Serialize.Generator
                 return new TypePropertyInfo(name, type, orderId);
             }).ToArray());
 
-            return new TargetTypeInfo(typeNamespace, typeName, serializerNamespace, serializerName, props);
+            return new TargetTypeInfo(typeNamespace, typeName, serializerNamespace, serializerName, useGlobally, props);
         }
 
         private bool HasAttribute(MemberDeclarationSyntax memberDeclarartion, SemanticModel model, string fullAttrName)

@@ -13,7 +13,7 @@ internal sealed class TestStructSerializer : ITypeSerializer<MyCode.TestStruct>
     [ModuleInitializer]
     internal static void Initializer()
     {
-        Serializer.RegisterSerializer<MyCode.TestStruct>(() => new TestStructSerializer());
+        Serializer.RegisterSerializer<MyCode.TestStruct>(() => new TestStructSerializer(), true);
     }
 
     private TestStructSerializer()
