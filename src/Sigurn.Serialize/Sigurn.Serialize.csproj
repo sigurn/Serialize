@@ -9,6 +9,7 @@
   <PropertyGroup>
     <GeneratePackageOnBuild>true</GeneratePackageOnBuild>
     <MinVerDefaultPreReleaseIdentifiers>dev</MinVerDefaultPreReleaseIdentifiers>
+    <MinVerMinimumMajorMinor>99.99</MinVerMinimumMajorMinor>
   </PropertyGroup>
 
   <ItemGroup>
