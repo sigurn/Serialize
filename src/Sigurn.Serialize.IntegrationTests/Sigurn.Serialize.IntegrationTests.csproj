@@ -30,6 +30,8 @@
   <Target Name="DeleteRestoredPackage" BeforeTargets="Restore">
     <RemoveDir Condition="Exists('$(RestorePackagesPath)/sigurn.serialize')"
                Directories="$(RestorePackagesPath)/sigurn.serialize" />
+    <RemoveDir Condition="Exists('$(RestorePackagesPath)\sigurn.serialize')"
+               Directories="$(RestorePackagesPath)\sigurn.serialize" />
   </Target>
 
   <Target Name="CleanLocalNuGetCache" AfterTargets="Clean">
