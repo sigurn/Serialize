@@ -37,7 +37,7 @@ jobs:
     - name: Test Release
       run: dotnet test --no-build --verbosity normal -c Release src\Sigurn.Serialize.Tests\Sigurn.Serialize.Tests.csproj
     - name: Restore Integration Tests
-      run: dotnet restore src\Sigurn.Serialize.IntegrationTests\Sigurn.Serialize.IntegrationTests.csproj
+      run: dotnet restore --verbosity normal src\Sigurn.Serialize.IntegrationTests\Sigurn.Serialize.IntegrationTests.csproj
     - name: Build Debug Integration Tests
       run: dotnet build --no-restore src\Sigurn.Serialize.IntegrationTests\Sigurn.Serialize.IntegrationTests.csproj
     - name: Build Release Integration Tests

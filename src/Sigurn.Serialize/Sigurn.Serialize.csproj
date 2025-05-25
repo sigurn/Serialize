@@ -62,7 +62,7 @@
     <Copy SourceFiles="@(GeneratedPackage)" DestinationFolder="$(CopyDestination)" />
   </Target>
 
-  <Target Name="RemoveArtifacts" BeforeTargets="Build">
+  <Target Name="RemoveArtifacts" BeforeTargets="Build;Clean">
     <RemoveDir Condition="Exists('$(MSBuildProjectDirectory)/../artifacts')"
                Directories="$(MSBuildProjectDirectory)/../artifacts" />
   </Target>
