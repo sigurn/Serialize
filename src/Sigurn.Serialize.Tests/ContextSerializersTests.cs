@@ -38,7 +38,7 @@ public class ContextSerializersTests
         var typeSerializer = new CustomTypeSerializer();
         var context = SerializationContext.Default with
         {
-            TypeSerializers = [ typeSerializer ]
+            TypeSerializers = [typeSerializer]
         };
 
         using var stream = new MemoryStream();
@@ -46,7 +46,7 @@ public class ContextSerializersTests
         cts.CancelAfter(TimeSpan.FromSeconds(5));
         await Serializer.ToStreamAsync(stream, new CustomType(), context, cts.Token);
         Assert.Equal(["ToStreamAsync"], typeSerializer.GetLog());
-        
+
         await Serializer.ToStreamAsync(stream, typeof(CustomType), new CustomType(), context, cts.Token);
         Assert.Equal(["ToStreamAsync", "ToStreamAsync"], typeSerializer.GetLog());
 
@@ -59,8 +59,43 @@ public class ContextSerializersTests
         var typeSerializer = new CustomTypeSerializer();
         var context = SerializationContext.Default with
         {
-            TypeSerializers = [ typeSerializer ]
+            TypeSerializers = [typeSerializer]
         };
+
+        using var stream = new MemoryStream([1, 1]);
+        using CancellationTokenSource cts = new CancellationTokenSource();
+        cts.CancelAfter(TimeSpan.FromSeconds(5));
+        var ct = await Serializer.FromStreamAsync<CustomType>(stream, context, cts.Token);
+        Assert.NotNull(ct);
+        Assert.Equal(["FromStreamAsync"], typeSerializer.GetLog());
+
+        ct = await Serializer.FromStreamAsync(stream, typeof(CustomType), context, cts.Token) as CustomType;
+        Assert.NotNull(ct);
+        Assert.Equal(["FromStreamAsync", "FromStreamAsync"], typeSerializer.GetLog());
+    }
+
+    record class TestSerializationContext : SerializationContext
+    {
+        private readonly ITypeSerializer _serializer;
+        public TestSerializationContext(ITypeSerializer serializer)
+        {
+            _serializer = serializer;
+        }
+
+        public override ITypeSerializer? FindTypeSerializer(Type type)
+        {
+            if (_serializer.Type == type)
+                return _serializer;
+
+            return base.FindTypeSerializer(type);
+        }
+    }
+
+    [Fact]
+    public async Task CanDeserializeWithCustomSerializerAndCustomContext()
+    {
+        var typeSerializer = new CustomTypeSerializer();
+        var context = new TestSerializationContext(typeSerializer);
 
         using var stream = new MemoryStream([1, 1]);
         using CancellationTokenSource cts = new CancellationTokenSource();

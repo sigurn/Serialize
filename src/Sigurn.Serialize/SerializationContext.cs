@@ -4,7 +4,7 @@ namespace Sigurn.Serialize;
 
 public record class SerializationContext
 {
-    public ITypeSerializer? FindTypeSerializer(Type type)
+    public virtual ITypeSerializer? FindTypeSerializer(Type type)
     {
         ArgumentNullException.ThrowIfNull(type);
 
