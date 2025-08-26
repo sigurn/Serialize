@@ -1,5 +1,8 @@
 # Serialize
 
+[![NuGet](https://img.shields.io/nuget/v/Sigurn.Serialize)](https://www.nuget.org/packages/Sigurn.Serialize)
+
+
 ## General information
 
 This is a binary serialization library. Originally it was designed to simplify communication with devices but later was extended to support more types and to be able to be used in an RPC library. The library supports all basic types and provides extensions for adding custom serializers as well as interfaces which allow making any type serializable.
