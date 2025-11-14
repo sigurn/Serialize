@@ -9,7 +9,6 @@
   </PropertyGroup>
 
   <PropertyGroup>
-
     <GeneratePackageOnBuild>false</GeneratePackageOnBuild>
   </PropertyGroup>
 

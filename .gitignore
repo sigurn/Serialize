@@ -2,10 +2,12 @@ bin/
 obj/
 *.swp
 .vscode/
+.idea/
 .DS_Store
 .mono/
 nuget/
 artifacts/
+*.DotSettings.user
 
 # Verify
 *.received.*
