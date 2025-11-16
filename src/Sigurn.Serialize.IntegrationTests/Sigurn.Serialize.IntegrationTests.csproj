@@ -7,9 +7,10 @@
 
     <IsPackable>false</IsPackable>
     <IsTestProject>true</IsTestProject>
-
+      
     <EmitCompilerGeneratedFiles>true</EmitCompilerGeneratedFiles>
     <RestorePackagesPath>$(MSBuildProjectDirectory)/nuget/cache</RestorePackagesPath>
+    <ArtifactsDestination>$(MSBuildProjectDirectory)/../artifacts</ArtifactsDestination>
   </PropertyGroup>
 
   <ItemGroup>
@@ -32,6 +33,11 @@
     <ProjectReference Include="..\Sigurn.Serialize\Sigurn.Serialize.csproj" />
   </ItemGroup>
 
+    <Target Name="CreateArtifacts" BeforeTargets="Restore">
+        <MakeDir Condition="!Exists('$(ArtifactsDestination)')"
+                 Directories="$(ArtifactsDestination)" />
+    </Target>
+
   <Target Name="DeleteRestoredPackage" BeforeTargets="Restore">
     <RemoveDir Condition="Exists('$(RestorePackagesPath)/sigurn.serialize')"
                Directories="$(RestorePackagesPath)/sigurn.serialize" />
@@ -39,8 +45,8 @@
                Directories="$(RestorePackagesPath)\sigurn.serialize" />
   </Target>
 
-  <Target Name="CleanLocalNuGetCache" AfterTargets="Clean">
+  <!--Target Name="CleanLocalNuGetCache" AfterTargets="Clean">
     <RemoveDir Condition="Exists('$(RestorePackagesPath)')"
                Directories="$(RestorePackagesPath)" />
-  </Target>
+  </Target-->
 </Project>

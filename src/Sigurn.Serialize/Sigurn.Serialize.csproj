@@ -15,10 +15,7 @@
 
   <ItemGroup>
     <ProjectReference Include="../Sigurn.Serialize.Generator/Sigurn.Serialize.Generator.csproj"
-
-                      PrivateAssets="all">
-<!--        <SetTargetFramework>TargetFramework=netstandard2.0</SetTargetFramework>-->
-    </ProjectReference>
+                      PrivateAssets="all"/>
   </ItemGroup>
 
   <ItemGroup>
@@ -28,6 +25,7 @@
 
   <PropertyGroup>
     <CopyLocalLockFileAssemblies>true</CopyLocalLockFileAssemblies>
+    <ArtifactsDestination>$(MSBuildProjectDirectory)/../artifacts</ArtifactsDestination>
   </PropertyGroup>
 
   <PropertyGroup>
@@ -48,8 +46,12 @@
     <None Include="$(OutputPath)/Microsoft.Bcl.HashCode.dll" Pack="true" 
           PackagePath="analyzers/dotnet/cs" Visible="false" />
   </ItemGroup>
-
-
+    
+    <Target Name="CreateArtifacts" BeforeTargets="Restore">
+        <MakeDir Condition="!Exists('$(ArtifactsDestination)')"
+                 Directories="$(ArtifactsDestination)" />
+    </Target>
+    
   <Target Name="CopyNuGetPackage" AfterTargets="Pack">
     <!-- Get the generated .nupkg file -->
     <ItemGroup>
@@ -60,7 +62,9 @@
     <PropertyGroup>
       <CopyDestination>$(MSBuildProjectDirectory)/../artifacts</CopyDestination>
     </PropertyGroup>
-
+      
+    <Message Text="Copy NuGet package to local repository: $(CopyDestination)" />
+             
     <!-- Create the destination directory -->
     <MakeDir Directories="$(CopyDestination)" />
 
