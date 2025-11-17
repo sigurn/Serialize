@@ -58,3 +58,5 @@ jobs:
         path: |
           **/bin/**
           **/obj/**
+          **/artifacts/**
+          **/nuget/**

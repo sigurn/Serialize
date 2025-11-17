@@ -29,8 +29,7 @@
   </ItemGroup>
 
   <ItemGroup>
-    <ProjectReference Include="..\Sigurn.Serialize.Generator\Sigurn.Serialize.Generator.csproj" />
-    <ProjectReference Include="..\Sigurn.Serialize\Sigurn.Serialize.csproj" />
+    <Folder Include="nuget\" />
   </ItemGroup>
 
     <Target Name="CreateArtifacts" BeforeTargets="Restore">
@@ -45,8 +44,4 @@
                Directories="$(RestorePackagesPath)\sigurn.serialize" />
   </Target>
 
-  <!--Target Name="CleanLocalNuGetCache" AfterTargets="Clean">
-    <RemoveDir Condition="Exists('$(RestorePackagesPath)')"
-               Directories="$(RestorePackagesPath)" />
-  </Target-->
 </Project>
