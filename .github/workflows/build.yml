@@ -50,3 +50,11 @@ jobs:
       run: dotnet test --no-build --verbosity normal src\Sigurn.Serialize.IntegrationTests\Sigurn.Serialize.IntegrationTests.csproj
     - name: Integration Test Release 
       run: dotnet test --no-build --verbosity normal -c Release src\Sigurn.Serialize.IntegrationTests\Sigurn.Serialize.IntegrationTests.csproj
+    - name: Upload build artifacts on failure
+      if: failure()
+      uses: actions/upload-artifact@v4
+      with:
+        name: build-output
+        path: |
+          **/bin/**
+          **/obj/**
