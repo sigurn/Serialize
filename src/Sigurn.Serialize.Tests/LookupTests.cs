@@ -143,7 +143,7 @@ public class LookupTests
         Assert.Same(first, Serializer.GetSerializer<TypeRegisteredTwice>());
     }
 
-    [Fact]
+    [OptimizedOnlyFact]
     public async Task WritingManySerializableValues_SetsNothingAsidePerValue()
     {
         var context = new SerializationContext { AllowNullValues = false };

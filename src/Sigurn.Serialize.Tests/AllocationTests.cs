@@ -8,7 +8,7 @@ public class AllocationTests
 
     public static IEnumerable<object[]> ByteOrders => [[ByteOrder.LittleEndian], [ByteOrder.BigEndian]];
 
-    [Theory]
+    [OptimizedOnlyTheory]
     [MemberData(nameof(ByteOrders))]
     public async Task WritingALargeArray_SetsNothingAsidePerElement(ByteOrder byteOrder)
     {
@@ -23,7 +23,7 @@ public class AllocationTests
         Assert.True(allocated < 16 * 1024, $"Writing {Count} doubles set aside {allocated} bytes.");
     }
 
-    [Theory]
+    [OptimizedOnlyTheory]
     [MemberData(nameof(ByteOrders))]
     public async Task ReadingALargeArray_WithRoomForItFromTheStart_SetsAsideLittleMoreThanTheArray(ByteOrder byteOrder)
     {
@@ -43,7 +43,7 @@ public class AllocationTests
         Assert.True(allocated < Count * sizeof(double) + 16 * 1024, $"Reading {Count} doubles set aside {allocated} bytes.");
     }
 
-    [Fact]
+    [OptimizedOnlyFact]
     public async Task ReadingAnArrayLargerThanItsInitialRoom_SetsAsideLessThanThreeTimesIt()
     {
         var context = new SerializationContext { AllowNullValues = false, InitialCollectionCapacity = 1024 };
