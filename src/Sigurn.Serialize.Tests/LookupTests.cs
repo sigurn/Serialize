@@ -94,6 +94,22 @@ public class LookupTests
     }
 
     [Fact]
+    public async Task ADictionary_LooksUpTheSerializersOfItsKeysAndValuesOnce()
+    {
+        var context = new CountingContext { AllowNullValues = false };
+        var values = Enumerable.Range(0, Count).ToDictionary(x => x, x => x * 0.5);
+        using var stream = new MemoryStream();
+
+        await Serializer.ToStreamAsync(stream, values, context, CancellationToken.None);
+        Assert.Equal(1, context.DoubleLookups);
+        stream.Position = 0;
+        var read = await Serializer.FromStreamAsync<Dictionary<int, double>>(stream, context, CancellationToken.None);
+
+        Assert.Equal(values, read);
+        Assert.Equal(2, context.DoubleLookups);
+    }
+
+    [Fact]
     public async Task AnEmptyArrayOfATypeNoSerializerKnows_IsStillWrittenAndRead()
     {
         var context = new SerializationContext { AllowNullValues = false, ByteOrder = ByteOrder.LittleEndian };

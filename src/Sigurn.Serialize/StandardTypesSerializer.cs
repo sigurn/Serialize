@@ -69,10 +69,24 @@ class StandardTypeSerializer<T> : ITypeSerializer<T>
 
 class StringSerializer : ITypeSerializer<string>
 {
+    // The room is no more than the context starts a collection with, and grows as the bytes arrive, so a length that claims more than
+    // follows runs out having set aside only what there was.
     public async ValueTask<string> FromStreamAsync(Stream stream, SerializationContext context, CancellationToken cancellationToken)
     {
-        var buf = new byte[await Serializer.FromStreamAsync<int>(stream, context, cancellationToken)];
-        await StreamBytes.ReadExactlyAsync(stream, buf, cancellationToken).ConfigureAwait(false);
+        var length = Limited(await Serializer.FromStreamAsync<int>(stream, context, cancellationToken).ConfigureAwait(false), context);
+        ArgumentOutOfRangeException.ThrowIfNegative(length);
+
+        var buf = new byte[Math.Min(length, context.InitialCollectionCapacity)];
+        var read = 0;
+        while (read < length)
+        {
+            if (read == buf.Length)
+                Array.Resize(ref buf, (int)Math.Min(length, 2L * buf.Length));
+
+            var piece = buf.Length - read;
+            await StreamBytes.ReadExactlyAsync(stream, buf.AsMemory(read, piece), cancellationToken).ConfigureAwait(false);
+            read += piece;
+        }
 
         return context.Encoding.GetString(buf);
     }
@@ -80,9 +94,14 @@ class StringSerializer : ITypeSerializer<string>
     public async ValueTask ToStreamAsync(Stream stream, string value, SerializationContext context, CancellationToken cancellationToken)
     {
         var data = context.Encoding.GetBytes(value);
-        await Serializer.ToStreamAsync(stream, data.Length, context, cancellationToken);
+        await Serializer.ToStreamAsync(stream, Limited(data.Length, context), context, cancellationToken);
         await stream.WriteAsync(data, 0, data.Length, cancellationToken);
     }
+
+    private static int Limited(int bytes, SerializationContext context) =>
+        context.MaxStringBytes is { } limit && bytes > limit
+            ? throw new SerializationException($"A string of {bytes} bytes is longer than the {limit} the context allows.")
+            : bytes;
 }
 
 class GuidSerializer : ITypeSerializer<Guid>

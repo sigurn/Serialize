@@ -83,6 +83,9 @@ Serialization context allows you to define different serialization parameters:
 3. **AllowNullValues** — flag that defines if `null` values are allowed in serialization. If `null` values are allowed, then the serializer adds a boolean flag before every reference type or nullable type value to define if there is a value or `null` value is stored. If `null` values are not allowed, then serializing any `null` value will throw an exception.
 4. **Encoding** — this property defines encoding which should be used for string serialization.
 5. **TypeSerializers** — array of type serializers which should be used for type serialization. This list is used first before using global serializers and allows redefining default type serializers and adding custom type serializers as well.
+6. **InitialCollectionCapacity** — how many elements a collection read starts with room for (or how many bytes a string read does), unless it claims fewer. The room grows as the elements actually arrive, so a collection or a string that claims more than its bytes hold is refused when they run out, having set aside no more than they held. Raise it if you read very large arrays, to spare them the copies the growth takes.
+7. **MaxCollectionLength** — the most elements a collection may hold to be written or read, or `null` for no limit.
+8. **MaxStringBytes** — the most bytes a string may take in the context's encoding to be written or read, or `null` for no limit.
 
 Default serialization context defines the following values:
 
@@ -93,9 +96,23 @@ public static readonly SerializationContext Default = new SerializationContext()
     UuidForm = UuidForm.Linux,
     Encoding = Encoding.UTF8,
     AllowNullValues = true,
-    TypeSerializers = []
+    TypeSerializers = [],
+    InitialCollectionCapacity = SerializationContext.DefaultInitialCollectionCapacity, // 65536
+    MaxCollectionLength = null,
+    MaxStringBytes = null
 };
 ```
+
+Immutable collections are written as their mutable counterparts are, and read back as themselves:
+
+- `ImmutableArray<T>` as an array of its elements; a default `ImmutableArray<T>`, which holds no array, is refused;
+- `ImmutableList<T>` and `IImmutableList<T>` as a list (read back as an `ImmutableList<T>`);
+- `ImmutableSortedSet<T>` as a list of its elements in their order;
+- `ImmutableSortedDictionary<TKey, TValue>` as a dictionary.
+
+A collection is written in the order it enumerates. A sorted collection always enumerates in the same order, so it is always written
+as the same bytes; a hash-based one (`HashSet<T>`, `Dictionary<TKey, TValue>`) may not, since hash codes can change from one run to the
+next — sort it first where the bytes must not change.
 
 ## How to make custom type serializable
 
