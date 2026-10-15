@@ -70,7 +70,7 @@ namespace Sigurn.Serialize.Generator
             if (tti.Properties.Count != 0)
                 fromStreamStringBuilder.Append($"        return new {tti.TypeNamespace}.{tti.TypeName}()\n");
             else
-                fromStreamStringBuilder.Append($"        return ValueTask.FromResult(new{tti.TypeNamespace}.{tti.TypeName}()\n");
+                fromStreamStringBuilder.Append($"        return ValueTask.FromResult(new {tti.TypeNamespace}.{tti.TypeName}()\n");
             fromStreamStringBuilder.Append("        {\n");
 
             foreach (var p in tti.Properties.OrderBy(x => x.OrderId))
