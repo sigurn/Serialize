@@ -1,58 +1,83 @@
+using System.Buffers;
+
 namespace Sigurn.Serialize;
+
+delegate void ToBytes<T>(T value, Span<byte> bytes);
+
+delegate T FromBytes<T>(ReadOnlySpan<byte> bytes);
 
 class StandardTypeSerializer<T> : ITypeSerializer<T>
 {
     private static readonly ByteOrder _converterByteOrder = BitConverter.IsLittleEndian ? ByteOrder.LittleEndian : ByteOrder.BigEndian;
 
     private readonly int _size;
-    private readonly Func<T, byte[]> _toBytes;
-    private readonly Func<byte[], T> _fromBytes;
+    private readonly ToBytes<T> _toBytes;
+    private readonly FromBytes<T> _fromBytes;
 
-    public StandardTypeSerializer(int size, Func<T, byte[]> toBytes, Func<byte[], T> fromBytes)
+    public StandardTypeSerializer(int size, ToBytes<T> toBytes, FromBytes<T> fromBytes)
     {
         _size = size;
         _toBytes = toBytes;
         _fromBytes = fromBytes;
     }
 
-    public async Task<T> FromStreamAsync(Stream stream, SerializationContext context, CancellationToken cancellationToken)
+    public async ValueTask<T> FromStreamAsync(Stream stream, SerializationContext context, CancellationToken cancellationToken)
     {
-        byte[] data = new byte[_size];
-
-        int len = await stream.ReadAsync(data, 0, data.Length, cancellationToken);
-        if (len != _size)
-            throw new SerializationException("Failed to read neccessary data from stream");
-
-        if (_converterByteOrder != context.ByteOrder && data.Length > 1)
-            data = data.Reverse().ToArray();
-
-        return _fromBytes(data);
+        var data = ArrayPool<byte>.Shared.Rent(_size);
+        try
+        {
+            await StreamBytes.ReadExactlyAsync(stream, data.AsMemory(0, _size), cancellationToken).ConfigureAwait(false);
+            return Decode(data, context.ByteOrder);
+        }
+        finally
+        {
+            ArrayPool<byte>.Shared.Return(data);
+        }
     }
 
-    public async Task ToStreamAsync(Stream stream, T value, SerializationContext context, CancellationToken cancellationToken)
+    public async ValueTask ToStreamAsync(Stream stream, T value, SerializationContext context, CancellationToken cancellationToken)
     {
-        var data = _toBytes(value);
+        var data = ArrayPool<byte>.Shared.Rent(_size);
+        try
+        {
+            Encode(value, data, context.ByteOrder);
+            await stream.WriteAsync(data.AsMemory(0, _size), cancellationToken).ConfigureAwait(false);
+        }
+        finally
+        {
+            ArrayPool<byte>.Shared.Return(data);
+        }
+    }
 
-        if (_converterByteOrder != context.ByteOrder && data.Length > 1)
-            data = data.Reverse().ToArray();
+    private T Decode(byte[] data, ByteOrder byteOrder)
+    {
+        var bytes = data.AsSpan(0, _size);
+        if (_converterByteOrder != byteOrder)
+            bytes.Reverse();
 
-        await stream.WriteAsync(data, 0, data.Length, cancellationToken);
+        return _fromBytes(bytes);
+    }
+
+    private void Encode(T value, byte[] data, ByteOrder byteOrder)
+    {
+        var bytes = data.AsSpan(0, _size);
+        _toBytes(value, bytes);
+        if (_converterByteOrder != byteOrder)
+            bytes.Reverse();
     }
 }
 
 class StringSerializer : ITypeSerializer<string>
 {
-    public async Task<string> FromStreamAsync(Stream stream, SerializationContext context, CancellationToken cancellationToken)
+    public async ValueTask<string> FromStreamAsync(Stream stream, SerializationContext context, CancellationToken cancellationToken)
     {
         var buf = new byte[await Serializer.FromStreamAsync<int>(stream, context, cancellationToken)];
-        int len = await stream.ReadAsync(buf, 0, buf.Length, cancellationToken);
-        if (len != buf.Length)
-            throw new SerializationException("Failed to read neccessary data from stream");
+        await StreamBytes.ReadExactlyAsync(stream, buf, cancellationToken).ConfigureAwait(false);
 
         return context.Encoding.GetString(buf);
     }
 
-    public async Task ToStreamAsync(Stream stream, string value, SerializationContext context, CancellationToken cancellationToken)
+    public async ValueTask ToStreamAsync(Stream stream, string value, SerializationContext context, CancellationToken cancellationToken)
     {
         var data = context.Encoding.GetBytes(value);
         await Serializer.ToStreamAsync(stream, data.Length, context, cancellationToken);
@@ -62,17 +87,15 @@ class StringSerializer : ITypeSerializer<string>
 
 class GuidSerializer : ITypeSerializer<Guid>
 {
-    public async Task<Guid> FromStreamAsync(Stream stream, SerializationContext context, CancellationToken cancellationToken)
+    public async ValueTask<Guid> FromStreamAsync(Stream stream, SerializationContext context, CancellationToken cancellationToken)
     {
         var buf = new byte[16];
-        int len = await stream.ReadAsync(buf, 0, buf.Length, cancellationToken);
-        if (len != buf.Length)
-            throw new SerializationException("Failed to read neccessary data from stream");
+        await StreamBytes.ReadExactlyAsync(stream, buf, cancellationToken).ConfigureAwait(false);
 
         return new Guid(buf, context.ByteOrder == ByteOrder.BigEndian || context.UuidForm == UuidForm.Linux);
     }
 
-    public async Task ToStreamAsync(Stream stream, Guid value, SerializationContext context, CancellationToken cancellationToken)
+    public async ValueTask ToStreamAsync(Stream stream, Guid value, SerializationContext context, CancellationToken cancellationToken)
     {
         var buf = new byte[16];
         if (!value.TryWriteBytes(buf, context.ByteOrder == ByteOrder.BigEndian || context.UuidForm == UuidForm.Linux, out int len))
@@ -83,7 +106,7 @@ class GuidSerializer : ITypeSerializer<Guid>
 
 class VersionSerializer : ITypeSerializer<Version>
 {
-    public async Task<Version> FromStreamAsync(Stream stream, SerializationContext context, CancellationToken cancellationToken)
+    public async ValueTask<Version> FromStreamAsync(Stream stream, SerializationContext context, CancellationToken cancellationToken)
     {
         var major = await Serializer.FromStreamAsync<int>(stream, context, cancellationToken);
         var minor = await Serializer.FromStreamAsync<int>(stream, context, cancellationToken);
@@ -99,7 +122,7 @@ class VersionSerializer : ITypeSerializer<Version>
         return new Version(major, minor, build, revision);
     }
 
-    public async Task ToStreamAsync(Stream stream, Version value, SerializationContext context, CancellationToken cancellationToken)
+    public async ValueTask ToStreamAsync(Stream stream, Version value, SerializationContext context, CancellationToken cancellationToken)
     {
         await Serializer.ToStreamAsync(stream, value.Major, context, cancellationToken);
         await Serializer.ToStreamAsync(stream, value.Minor, context, cancellationToken);
@@ -110,7 +133,7 @@ class VersionSerializer : ITypeSerializer<Version>
 
 class DateSerializer : ITypeSerializer<DateOnly>
 {
-    public async Task<DateOnly> FromStreamAsync(Stream stream, SerializationContext context, CancellationToken cancellationToken)
+    public async ValueTask<DateOnly> FromStreamAsync(Stream stream, SerializationContext context, CancellationToken cancellationToken)
     {
         var year = await Serializer.FromStreamAsync<short>(stream, context, cancellationToken);
         var month = await Serializer.FromStreamAsync<byte>(stream, context, cancellationToken);
@@ -119,7 +142,7 @@ class DateSerializer : ITypeSerializer<DateOnly>
         return new DateOnly(year, month, day);
     }
 
-    public async Task ToStreamAsync(Stream stream, DateOnly value, SerializationContext context, CancellationToken cancellationToken)
+    public async ValueTask ToStreamAsync(Stream stream, DateOnly value, SerializationContext context, CancellationToken cancellationToken)
     {
         await Serializer.ToStreamAsync(stream, (short)value.Year, context, cancellationToken);
         await Serializer.ToStreamAsync(stream, (byte)value.Month, context, cancellationToken);
@@ -129,13 +152,13 @@ class DateSerializer : ITypeSerializer<DateOnly>
 
 class TimeSerializer : ITypeSerializer<TimeOnly>
 {
-    public async Task<TimeOnly> FromStreamAsync(Stream stream, SerializationContext context, CancellationToken cancellationToken)
+    public async ValueTask<TimeOnly> FromStreamAsync(Stream stream, SerializationContext context, CancellationToken cancellationToken)
     {
         long ticks = await Serializer.FromStreamAsync<long>(stream, context, cancellationToken);
         return new TimeOnly(ticks);
     }
 
-    public async Task ToStreamAsync(Stream stream, TimeOnly value, SerializationContext context, CancellationToken cancellationToken)
+    public async ValueTask ToStreamAsync(Stream stream, TimeOnly value, SerializationContext context, CancellationToken cancellationToken)
     {
         await Serializer.ToStreamAsync(stream, value.Ticks, context, cancellationToken);
     }

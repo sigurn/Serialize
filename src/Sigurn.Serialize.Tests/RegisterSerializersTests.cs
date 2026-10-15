@@ -9,27 +9,27 @@ record TestLocalRecordType();
 
 class GlobalSerializer : ITypeSerializer<TestGlobalRecordType>
 {
-    public Task<TestGlobalRecordType> FromStreamAsync(Stream stream, SerializationContext context, CancellationToken cancellationToken)
+    public ValueTask<TestGlobalRecordType> FromStreamAsync(Stream stream, SerializationContext context, CancellationToken cancellationToken)
     {
-        return Task.FromResult(new TestGlobalRecordType());
+        return ValueTask.FromResult(new TestGlobalRecordType());
     }
 
-    public Task ToStreamAsync(Stream stream, TestGlobalRecordType value, SerializationContext context, CancellationToken cancellationToken)
+    public ValueTask ToStreamAsync(Stream stream, TestGlobalRecordType value, SerializationContext context, CancellationToken cancellationToken)
     {
-        return Task.CompletedTask;
+        return ValueTask.CompletedTask;
     }
 }
 
 class LocalSerializer : ITypeSerializer<TestLocalRecordType>
 {
-    public Task<TestLocalRecordType> FromStreamAsync(Stream stream, SerializationContext context, CancellationToken cancellationToken)
+    public ValueTask<TestLocalRecordType> FromStreamAsync(Stream stream, SerializationContext context, CancellationToken cancellationToken)
     {
-        return Task.FromResult(new TestLocalRecordType());
+        return ValueTask.FromResult(new TestLocalRecordType());
     }
 
-    public Task ToStreamAsync(Stream stream, TestLocalRecordType value, SerializationContext context, CancellationToken cancellationToken)
+    public ValueTask ToStreamAsync(Stream stream, TestLocalRecordType value, SerializationContext context, CancellationToken cancellationToken)
     {
-        return Task.CompletedTask;
+        return ValueTask.CompletedTask;
     }
 }
 

@@ -12,16 +12,16 @@ class CustomType
 class CustomTypeSerializer : ITypeSerializer<CustomType>
 {
     private readonly ConcurrentBag<string> _log = new ();
-    public Task<CustomType> FromStreamAsync(Stream stream, SerializationContext context, CancellationToken cancellationToken)
+    public ValueTask<CustomType> FromStreamAsync(Stream stream, SerializationContext context, CancellationToken cancellationToken)
     {
         _log.Add("FromStreamAsync");
-        return Task.FromResult(new CustomType());
+        return ValueTask.FromResult(new CustomType());
     }
 
-    public Task ToStreamAsync(Stream stream, CustomType value, SerializationContext context, CancellationToken cancellationToken)
+    public ValueTask ToStreamAsync(Stream stream, CustomType value, SerializationContext context, CancellationToken cancellationToken)
     {
         _log.Add("ToStreamAsync");
-        return Task.CompletedTask;
+        return ValueTask.CompletedTask;
     }
 
     public IReadOnlyList<string> GetLog()

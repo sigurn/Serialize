@@ -10,12 +10,11 @@ sealed class SerializableTypeSerializer : ITypeSerializer
 
     public Type Type { get; }
 
-    public async Task<object> FromStreamAsync(Stream stream, Type type, SerializationContext context, CancellationToken cancellationToken)
+    public async ValueTask<object> FromStreamAsync(Stream stream, Type type, SerializationContext context, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(stream);
         ArgumentNullException.ThrowIfNull(type);
         ArgumentNullException.ThrowIfNull(context);
-        ArgumentNullException.ThrowIfNull(cancellationToken);
 
         if (type != Type)
             throw new ArgumentException($"This serializer cannot serialize type '{type}'. It can serialize only instances of type '{Type}'");
@@ -28,13 +27,12 @@ sealed class SerializableTypeSerializer : ITypeSerializer
         return serializable;
     }
 
-    public Task ToStreamAsync(Stream stream, Type type, object value, SerializationContext context, CancellationToken cancellationToken)
+    public ValueTask ToStreamAsync(Stream stream, Type type, object value, SerializationContext context, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(stream);
         ArgumentNullException.ThrowIfNull(type);
         ArgumentNullException.ThrowIfNull(value);
         ArgumentNullException.ThrowIfNull(context);
-        ArgumentNullException.ThrowIfNull(cancellationToken);
 
         if (type != Type)
             throw new ArgumentException($"This serializer cannot serialize type '{type}'. It can serialize only instances of type '{Type}'");

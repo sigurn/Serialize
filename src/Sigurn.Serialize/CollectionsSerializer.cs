@@ -1,5 +1,6 @@
 
 using System.Collections;
+using System.Collections.Concurrent;
 
 namespace Sigurn.Serialize;
 
@@ -22,11 +23,10 @@ class CollectionsSerializer : IGeneralSerializer
         return false;
     }
 
-    public async Task<object> FromStreamAsync(Stream stream, Type type, SerializationContext context, CancellationToken cancellationToken)
+    public async ValueTask<object> FromStreamAsync(Stream stream, Type type, SerializationContext context, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(stream);
         ArgumentNullException.ThrowIfNull(type);
-        ArgumentNullException.ThrowIfNull(cancellationToken);
 
         if (type.IsArray)
         {
@@ -69,20 +69,28 @@ class CollectionsSerializer : IGeneralSerializer
         throw new NotImplementedException();
     }
 
-    public async Task ToStreamAsync(Stream stream, Type type, object value, SerializationContext context, CancellationToken cancellationToken)
+    public async ValueTask ToStreamAsync(Stream stream, Type type, object value, SerializationContext context, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(stream);
         ArgumentNullException.ThrowIfNull(type);
         ArgumentNullException.ThrowIfNull(value);
-        ArgumentNullException.ThrowIfNull(cancellationToken);
         
-        if (type.IsArray)
+        if (type.IsSZArray)
+        {
+            var itemType = type.GetElementType() ?? throw new SerializationException("Type of array element cannot be null");
+            await Items.Of(itemType).ToStreamAsync(stream, value, context, cancellationToken);
+        }
+        else if (type.IsArray)
         {
             var itemType = type.GetElementType() ?? throw new SerializationException("Type of array element cannot be null");
             Array array = (Array)value;
             await Serializer.ToStreamAsync(stream, array.Length, context, cancellationToken);
             foreach(var item in array)
                 await Serializer.ToStreamAsync(stream, itemType, item, context, cancellationToken);
+        }
+        else if (type.IsGenericType && type.GetGenericArguments().Length == 1)
+        {
+            await Items.Of(type.GetGenericArguments()[0]).ToStreamAsync(stream, value, context, cancellationToken);
         }
         else if (type.IsAssignableTo(typeof(IList)))
         {
@@ -144,33 +152,96 @@ class CollectionsSerializer : IGeneralSerializer
             throw new SerializationException($"This serializer cannot serialize type {type}");
     }
 
-    private async Task<object> ArrayFromStream(Stream stream, Type elementType, SerializationContext context, CancellationToken cancellationToken)
+    private ValueTask<object> ArrayFromStream(Stream stream, Type elementType, SerializationContext context, CancellationToken cancellationToken) =>
+        Items.Of(elementType).ArrayFromStreamAsync(stream, context, cancellationToken);
+
+    private ValueTask<object> ListFromStream(Stream stream, Type type, SerializationContext context, CancellationToken cancellationToken) =>
+        Items.Of(type.GetGenericArguments()[0]).ListFromStreamAsync(stream, context, cancellationToken);
+
+    // The elements of a collection, written and read as their own type: an element is never boxed on its way to or from the stream,
+    // and a large collection sets aside nothing per element beyond what its own serializer does.
+    private abstract class Items
     {
-        var len = await Serializer.FromStreamAsync<int>(stream, context, cancellationToken);
-        var array = Array.CreateInstance(elementType, len);
-        for(int i=0; i<len; i++)
-            array.SetValue(await Serializer.FromStreamAsync(stream, elementType, context, cancellationToken), i);
-        return array;
+        private static readonly ConcurrentDictionary<Type, Items> _ofType = new();
+
+        public static Items Of(Type itemType) =>
+            _ofType.GetOrAdd(itemType, static itemType => (Items)Activator.CreateInstance(typeof(Items<>).MakeGenericType(itemType))!);
+
+        public abstract ValueTask ToStreamAsync(Stream stream, object value, SerializationContext context, CancellationToken cancellationToken);
+
+        public abstract ValueTask<object> ArrayFromStreamAsync(Stream stream, SerializationContext context, CancellationToken cancellationToken);
+
+        public abstract ValueTask<object> ListFromStreamAsync(Stream stream, SerializationContext context, CancellationToken cancellationToken);
     }
 
-    private async Task<object> ListFromStream(Stream stream, Type type, SerializationContext context, CancellationToken cancellationToken)
+    // The serializer of the elements is found once for the whole collection, and only when it has an element to find it for: an
+    // empty collection of a type no serializer knows is still written and read, as it always was.
+    private sealed class Items<TItem> : Items
     {
-        var genericType = typeof(List<>);
-        var elementType = type.GetGenericArguments()[0];
-        var listType = genericType.MakeGenericType(elementType);
-        var ctor = listType.GetConstructor([]);
-        if (ctor is null)
-            throw new SerializationException($"Cannot create an instance of type {type}");
+        public override async ValueTask ToStreamAsync(Stream stream, object value, SerializationContext context, CancellationToken cancellationToken)
+        {
+            switch (value)
+            {
+                case IReadOnlyList<TItem> list:
+                    await Serializer.ToStreamAsync(stream, list.Count, context, cancellationToken).ConfigureAwait(false);
+                    if (list.Count == 0)
+                        break;
 
-        IList list = (IList)ctor.Invoke([]);
-        var len = await Serializer.FromStreamAsync<int>(stream, context, cancellationToken);
-        for(int i=0; i<len; i++)
-            list.Add(await Serializer.FromStreamAsync(stream, elementType, context, cancellationToken));
+                    var resolved = Serializer.Resolve(typeof(TItem), context);
+                    for (int i = 0; i < list.Count; i++)
+                        await Serializer.WriteResolvedAsync(stream, list[i], resolved, context, cancellationToken).ConfigureAwait(false);
+                    break;
 
-        return list;
+                case IEnumerable<TItem> items:
+                    var count = items switch
+                    {
+                        ICollection<TItem> collection => collection.Count,
+                        IReadOnlyCollection<TItem> collection => collection.Count,
+                        _ => items.Count(),
+                    };
+                    await Serializer.ToStreamAsync(stream, count, context, cancellationToken).ConfigureAwait(false);
+                    if (count == 0)
+                        break;
+
+                    var resolvedItem = Serializer.Resolve(typeof(TItem), context);
+                    foreach (var item in items)
+                        await Serializer.WriteResolvedAsync(stream, item, resolvedItem, context, cancellationToken).ConfigureAwait(false);
+                    break;
+
+                default:
+                    throw new SerializationException($"This serializer cannot serialize type {value.GetType()}");
+            }
+        }
+
+        public override async ValueTask<object> ArrayFromStreamAsync(Stream stream, SerializationContext context, CancellationToken cancellationToken)
+        {
+            var len = await Serializer.FromStreamAsync<int>(stream, context, cancellationToken).ConfigureAwait(false);
+            ArgumentOutOfRangeException.ThrowIfNegative(len);
+            var array = new TItem[len];
+            if (len == 0)
+                return array;
+
+            var resolved = Serializer.Resolve(typeof(TItem), context);
+            for (int i = 0; i < len; i++)
+                array[i] = (await Serializer.ReadResolvedAsync<TItem>(stream, resolved, context, cancellationToken).ConfigureAwait(false))!;
+            return array;
+        }
+
+        public override async ValueTask<object> ListFromStreamAsync(Stream stream, SerializationContext context, CancellationToken cancellationToken)
+        {
+            var len = await Serializer.FromStreamAsync<int>(stream, context, cancellationToken).ConfigureAwait(false);
+            var list = new List<TItem>();
+            if (len <= 0)
+                return list;
+
+            var resolved = Serializer.Resolve(typeof(TItem), context);
+            for (int i = 0; i < len; i++)
+                list.Add((await Serializer.ReadResolvedAsync<TItem>(stream, resolved, context, cancellationToken).ConfigureAwait(false))!);
+            return list;
+        }
     }
 
-    private async Task<object> HashSetFromStream(Stream stream, Type type, SerializationContext context, CancellationToken cancellationToken)
+    private async ValueTask<object> HashSetFromStream(Stream stream, Type type, SerializationContext context, CancellationToken cancellationToken)
     {
         var genericType = typeof(HashSet<>);
         var elementType = type.GetGenericArguments()[0];
@@ -184,7 +255,7 @@ class CollectionsSerializer : IGeneralSerializer
         return ctor.Invoke([array]);
     }
 
-    private async Task<object> StackFromStream(Stream stream, Type type, SerializationContext context, CancellationToken cancellationToken)
+    private async ValueTask<object> StackFromStream(Stream stream, Type type, SerializationContext context, CancellationToken cancellationToken)
     {
         var genericType = typeof(Stack<>);
         var elementType = type.GetGenericArguments()[0];
@@ -199,7 +270,7 @@ class CollectionsSerializer : IGeneralSerializer
         return ctor.Invoke([array]);
     }
 
-    private async Task<object> QueueFromStream(Stream stream, Type type, SerializationContext context, CancellationToken cancellationToken)
+    private async ValueTask<object> QueueFromStream(Stream stream, Type type, SerializationContext context, CancellationToken cancellationToken)
     {
         var genericType = typeof(Queue<>);
         var elementType = type.GetGenericArguments()[0];
@@ -213,7 +284,7 @@ class CollectionsSerializer : IGeneralSerializer
         return ctor.Invoke([array]);
     }
 
-    private async Task<object> SortedSetFromStream(Stream stream, Type type, SerializationContext context, CancellationToken cancellationToken)
+    private async ValueTask<object> SortedSetFromStream(Stream stream, Type type, SerializationContext context, CancellationToken cancellationToken)
     {
         var genericType = typeof(SortedSet<>);
         var elementType = type.GetGenericArguments()[0];
@@ -227,7 +298,7 @@ class CollectionsSerializer : IGeneralSerializer
         return ctor.Invoke([array]);
     }
 
-    private async Task<object> LinkedListFromStream(Stream stream, Type type, SerializationContext context, CancellationToken cancellationToken)
+    private async ValueTask<object> LinkedListFromStream(Stream stream, Type type, SerializationContext context, CancellationToken cancellationToken)
     {
         var genericType = typeof(LinkedList<>);
         var elementType = type.GetGenericArguments()[0];
@@ -241,7 +312,7 @@ class CollectionsSerializer : IGeneralSerializer
         return ctor.Invoke([array]);
     }
 
-    private async Task<object> DictionaryFromStream(Stream stream, Type type, SerializationContext context, CancellationToken cancellationToken)
+    private async ValueTask<object> DictionaryFromStream(Stream stream, Type type, SerializationContext context, CancellationToken cancellationToken)
     {
         var genericType = typeof(Dictionary<,>);
         var keyType = type.GetGenericArguments()[0];
@@ -265,7 +336,7 @@ class CollectionsSerializer : IGeneralSerializer
         return dic;
     }
 
-    private async Task<object> SortedDictionaryFromStream(Stream stream, Type type, SerializationContext context, CancellationToken cancellationToken)
+    private async ValueTask<object> SortedDictionaryFromStream(Stream stream, Type type, SerializationContext context, CancellationToken cancellationToken)
     {
         var genericType = typeof(SortedDictionary<,>);
         var keyType = type.GetGenericArguments()[0];
@@ -289,7 +360,7 @@ class CollectionsSerializer : IGeneralSerializer
         return dic;
     }
 
-    private async Task<object> SortedListFromStream(Stream stream, Type type, SerializationContext context, CancellationToken cancellationToken)
+    private async ValueTask<object> SortedListFromStream(Stream stream, Type type, SerializationContext context, CancellationToken cancellationToken)
     {
         var genericType = typeof(SortedList<,>);
         var keyType = type.GetGenericArguments()[0];

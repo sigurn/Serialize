@@ -114,14 +114,14 @@ public class MyCustomType : ISerializable
 
     public string Prop3 { get; set; } = string.Empty;
 
-    public async Task ToStreamAsync(Stream stream, SerializationContext context, CancellationToken cancellationToken)
+    public async ValueTask ToStreamAsync(Stream stream, SerializationContext context, CancellationToken cancellationToken)
     {
         await Serializer.ToStreamAsync(stream, Prop1, context, cancellationToken);
         await Serializer.ToStreamAsync(stream, Prop2, context, cancellationToken);
         await Serializer.ToStreamAsync(stream, Prop3, context, cancellationToken);
     }
 
-    public async Task FromStreamAsync(Stream stream, SerializationContext context, CancellationToken cancellationToken)
+    public async ValueTask FromStreamAsync(Stream stream, SerializationContext context, CancellationToken cancellationToken)
     {
         Prop1 = await Serializer.FromStreamAsync<int>(stream, context, cancellationToken);
         Prop2 = await Serializer.FromStreamAsync<bool>(stream, context, cancellationToken);
@@ -146,14 +146,14 @@ public class MyCustomType
 
 public class MyCustomTypeSerializer : ITypeSerializer<MyCustomType>
 {
-    public async Task ToStreamAsync(Stream stream, MyCustomType value, SerializationContext context, CancellationToken cancellationToken)
+    public async ValueTask ToStreamAsync(Stream stream, MyCustomType value, SerializationContext context, CancellationToken cancellationToken)
     {
         await Serializer.ToStreamAsync(stream, value.Prop1, context, cancellationToken);
         await Serializer.ToStreamAsync(stream, value.Prop2, context, cancellationToken);
         await Serializer.ToStreamAsync(stream, value.Prop3, context, cancellationToken);
     }
 
-    public async Task<MyCustomType> FromStreamAsync(Stream stream, SerializationContext context, CancellationToken cancellationToken)
+    public async ValueTask<MyCustomType> FromStreamAsync(Stream stream, SerializationContext context, CancellationToken cancellationToken)
     {
         return new MyCustomType()
         {

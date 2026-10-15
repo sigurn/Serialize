@@ -1,3 +1,6 @@
+using System.Collections.Concurrent;
+using System.Collections.Frozen;
+
 namespace Sigurn.Serialize;
 
 /// <summary>
@@ -8,48 +11,49 @@ namespace Sigurn.Serialize;
 /// </remarks>
 public static class Serializer
 {
-    private static readonly Dictionary<Type, Lazy<ITypeSerializer>> _typeSerializers = [];
-    private static readonly Dictionary<Type, Lazy<ITypeSerializer>> _globalTypeSerializers = [];
+    // Serializers are registered seldom and looked up for every value written or read. So a registration builds new tables under
+    // the one lock and publishes them whole, and a lookup reads whichever tables are published, without a lock.
+    private static readonly object _registration = new();
 
-    private static readonly List<IGeneralSerializer> _genericSerializers =
+    private static FrozenDictionary<Type, Lazy<ITypeSerializer>> _typeSerializers = FrozenDictionary<Type, Lazy<ITypeSerializer>>.Empty;
+    private static FrozenDictionary<Type, Lazy<ITypeSerializer>> _globalTypeSerializers = FrozenDictionary<Type, Lazy<ITypeSerializer>>.Empty;
+
+    private static IGeneralSerializer[] _genericSerializers =
     [
         new CollectionsSerializer(),
         new KeyValuePairSerializer(),
         new EnumSerializer()
     ];
 
+    private static readonly ConcurrentDictionary<Type, SerializableTypeSerializer> _serializableTypeSerializers = new();
+
     static Serializer()
     {
-        RegisterSerializer(() => new StandardTypeSerializer<bool>(1, x => x ? [1] : [0], x => x[0] != 0));
+        RegisterSerializer(() => new StandardTypeSerializer<bool>(1, (x, b) => b[0] = x ? (byte)1 : (byte)0, x => x[0] != 0));
 
-        RegisterSerializer(() => new StandardTypeSerializer<byte>(1, x => [x], x => x[0]));
-        RegisterSerializer(() => new StandardTypeSerializer<sbyte>(1, x => [(byte)x], x => (sbyte)x[0]));
+        RegisterSerializer(() => new StandardTypeSerializer<byte>(1, (x, b) => b[0] = x, x => x[0]));
+        RegisterSerializer(() => new StandardTypeSerializer<sbyte>(1, (x, b) => b[0] = (byte)x, x => (sbyte)x[0]));
 
-        RegisterSerializer(() => new StandardTypeSerializer<short>(2, x => BitConverter.GetBytes(x), x => BitConverter.ToInt16(x)));
-        RegisterSerializer(() => new StandardTypeSerializer<ushort>(2, x => BitConverter.GetBytes(x), x => BitConverter.ToUInt16(x)));
+        RegisterSerializer(() => new StandardTypeSerializer<short>(2, (x, b) => BitConverter.TryWriteBytes(b, x), x => BitConverter.ToInt16(x)));
+        RegisterSerializer(() => new StandardTypeSerializer<ushort>(2, (x, b) => BitConverter.TryWriteBytes(b, x), x => BitConverter.ToUInt16(x)));
 
-        RegisterSerializer(() => new StandardTypeSerializer<int>(4, x => BitConverter.GetBytes(x), x => BitConverter.ToInt32(x)));
-        RegisterSerializer(() => new StandardTypeSerializer<uint>(4, x => BitConverter.GetBytes(x), x => BitConverter.ToUInt32(x)));
+        RegisterSerializer(() => new StandardTypeSerializer<int>(4, (x, b) => BitConverter.TryWriteBytes(b, x), x => BitConverter.ToInt32(x)));
+        RegisterSerializer(() => new StandardTypeSerializer<uint>(4, (x, b) => BitConverter.TryWriteBytes(b, x), x => BitConverter.ToUInt32(x)));
 
-        RegisterSerializer(() => new StandardTypeSerializer<long>(8, x => BitConverter.GetBytes(x), x => BitConverter.ToInt64(x)));
-        RegisterSerializer(() => new StandardTypeSerializer<ulong>(8, x => BitConverter.GetBytes(x), x => BitConverter.ToUInt64(x)));
+        RegisterSerializer(() => new StandardTypeSerializer<long>(8, (x, b) => BitConverter.TryWriteBytes(b, x), x => BitConverter.ToInt64(x)));
+        RegisterSerializer(() => new StandardTypeSerializer<ulong>(8, (x, b) => BitConverter.TryWriteBytes(b, x), x => BitConverter.ToUInt64(x)));
 
-        RegisterSerializer(() => new StandardTypeSerializer<float>(4, x => BitConverter.GetBytes(x), x => BitConverter.ToSingle(x)));
-        RegisterSerializer(() => new StandardTypeSerializer<double>(8, x => BitConverter.GetBytes(x), x => BitConverter.ToDouble(x)));
+        RegisterSerializer(() => new StandardTypeSerializer<float>(4, (x, b) => BitConverter.TryWriteBytes(b, x), x => BitConverter.ToSingle(x)));
+        RegisterSerializer(() => new StandardTypeSerializer<double>(8, (x, b) => BitConverter.TryWriteBytes(b, x), x => BitConverter.ToDouble(x)));
 
-        RegisterSerializer(() => new StandardTypeSerializer<decimal>(16, 
-            x => decimal.GetBits(x).SelectMany(x => BitConverter.GetBytes(x)).ToArray(),
-            x => new decimal([  BitConverter.ToInt32(x[0..4]), 
-                                BitConverter.ToInt32(x[4..8]),
-                                BitConverter.ToInt32(x[8..12]),
-                                BitConverter.ToInt32(x[12..16])])));
+        RegisterSerializer(() => new StandardTypeSerializer<decimal>(16, WriteDecimal, ReadDecimal));
 
-        RegisterSerializer(() => new StandardTypeSerializer<DateTime>(8, 
-            x => BitConverter.GetBytes(x.Ticks),
+        RegisterSerializer(() => new StandardTypeSerializer<DateTime>(8,
+            (x, b) => BitConverter.TryWriteBytes(b, x.Ticks),
             x => new DateTime(BitConverter.ToInt64(x))));
 
-        RegisterSerializer(() => new StandardTypeSerializer<TimeSpan>(8, 
-            x => BitConverter.GetBytes(x.Ticks),
+        RegisterSerializer(() => new StandardTypeSerializer<TimeSpan>(8,
+            (x, b) => BitConverter.TryWriteBytes(b, x.Ticks),
             x => new TimeSpan(BitConverter.ToInt64(x))));
 
         RegisterSerializer(() => new DateSerializer());
@@ -59,6 +63,22 @@ public static class Serializer
 
         RegisterSerializer(() => new GuidSerializer());
         RegisterSerializer(() => new VersionSerializer());
+    }
+
+    private static void WriteDecimal(decimal value, Span<byte> bytes)
+    {
+        Span<int> bits = stackalloc int[4];
+        decimal.GetBits(value, bits);
+        for (int i = 0; i < bits.Length; i++)
+            BitConverter.TryWriteBytes(bytes[(i * 4)..], bits[i]);
+    }
+
+    private static decimal ReadDecimal(ReadOnlySpan<byte> bytes)
+    {
+        Span<int> bits = stackalloc int[4];
+        for (int i = 0; i < bits.Length; i++)
+            bits[i] = BitConverter.ToInt32(bytes.Slice(i * 4, 4));
+        return new decimal(bits);
     }
 
     /// <summary>
@@ -71,14 +91,7 @@ public static class Serializer
     {
         ArgumentNullException.ThrowIfNull(serializer);
 
-        var lazyInstance = new Lazy<ITypeSerializer>(serializer);
-
-        lock (_typeSerializers)
-            _typeSerializers.Add(typeof(T), lazyInstance);
-
-        if (useGlobally)
-            lock (_globalTypeSerializers)
-                _globalTypeSerializers.Add(typeof(T), lazyInstance);
+        Register(typeof(T), new Lazy<ITypeSerializer>(serializer), useGlobally);
     }
 
     /// <summary>
@@ -94,14 +107,7 @@ public static class Serializer
     {
         ArgumentNullException.ThrowIfNull(serializerFactory);
 
-        var lazyInstance = new Lazy<ITypeSerializer>(serializerFactory);
-
-        lock (_typeSerializers)
-            _typeSerializers.Add(typeof(T), lazyInstance);
-            
-        if (useGlobally)
-            lock (_globalTypeSerializers)
-                _globalTypeSerializers.Add(typeof(T), lazyInstance);
+        Register(typeof(T), new Lazy<ITypeSerializer>(serializerFactory), useGlobally);
     }
 
     /// <summary>
@@ -118,14 +124,7 @@ public static class Serializer
         if (typeof(T) == typeof(object))
             throw new ArgumentException("Type serializer cannot be used for serializing objects. Please use GeneralSerializer for that.");
 
-        var lazyInstance = new Lazy<ITypeSerializer>(serializerFactory);
-
-        lock (_typeSerializers)
-            _typeSerializers.Add(typeof(T), lazyInstance);
-
-        if (useGlobally)
-            lock (_globalTypeSerializers)
-                _globalTypeSerializers.Add(typeof(T), lazyInstance);
+        Register(typeof(T), new Lazy<ITypeSerializer>(serializerFactory), useGlobally);
     }
 
     /// <summary>
@@ -144,14 +143,7 @@ public static class Serializer
         if (serializer.Type == typeof(object))
             throw new ArgumentException("Type serializer cannot be used for serializing objects. Please use GeneralSerializer for that.");
 
-        var lazyInstance = new Lazy<ITypeSerializer>(serializer);
-
-        lock (_typeSerializers)
-            _typeSerializers.Add(serializer.Type, lazyInstance);
-
-        if (useGlobally)
-            lock (_globalTypeSerializers)
-                _globalTypeSerializers.Add(serializer.Type, lazyInstance);
+        Register(serializer.Type, new Lazy<ITypeSerializer>(serializer), useGlobally);
     }
 
     /// <summary>
@@ -163,10 +155,27 @@ public static class Serializer
     {
         if (serializer is null)
             throw new ArgumentNullException(nameof(serializer));
-            
-        lock(_genericSerializers)
-            _genericSerializers.Add(serializer);
+
+        lock (_registration)
+            Volatile.Write(ref _genericSerializers, [.. _genericSerializers, serializer]);
     }
+
+    // Both tables or neither: a type already registered is refused before either table changes.
+    private static void Register(Type type, Lazy<ITypeSerializer> serializer, bool useGlobally)
+    {
+        lock (_registration)
+        {
+            if (_typeSerializers.ContainsKey(type))
+                throw new ArgumentException($"A serializer for the type '{type}' is already registered.");
+
+            Volatile.Write(ref _typeSerializers, With(_typeSerializers, type, serializer));
+            if (useGlobally)
+                Volatile.Write(ref _globalTypeSerializers, With(_globalTypeSerializers, type, serializer));
+        }
+    }
+
+    private static FrozenDictionary<Type, Lazy<ITypeSerializer>> With(FrozenDictionary<Type, Lazy<ITypeSerializer>> table, Type type, Lazy<ITypeSerializer> serializer) =>
+        table.Append(new KeyValuePair<Type, Lazy<ITypeSerializer>>(type, serializer)).ToFrozenDictionary();
 
     /// <summary>
     /// Creates serializer instance for the specified type.
@@ -179,9 +188,8 @@ public static class Serializer
     /// </remarks>
     public static ITypeSerializer<T> GetSerializer<T>()
     {
-        lock (_typeSerializers)
-            if (_typeSerializers.TryGetValue(typeof(T), out var factory))
-                return (ITypeSerializer<T>)factory.Value;
+        if (Volatile.Read(ref _typeSerializers).TryGetValue(typeof(T), out var factory))
+            return (ITypeSerializer<T>)factory.Value;
 
         throw new ArgumentException($"Serializer for the type '{typeof(T)}' is not registered.");
     }
@@ -198,18 +206,15 @@ public static class Serializer
             throw new ArgumentNullException(nameof(type));
 
         if (type.IsAssignableTo(typeof(ISerializable)))
-            return new SerializableTypeSerializer(type);
+            return _serializableTypeSerializers.GetOrAdd(type, static type => new SerializableTypeSerializer(type));
 
-        lock (_globalTypeSerializers)
-            if (_globalTypeSerializers.TryGetValue(type, out Lazy<ITypeSerializer>? lazySerializer))
-                return lazySerializer.Value;
+        if (Volatile.Read(ref _globalTypeSerializers).TryGetValue(type, out Lazy<ITypeSerializer>? lazySerializer))
+            return lazySerializer.Value;
 
-        ITypeSerializer? serializer = null;
-        lock (_genericSerializers)
-            serializer = _genericSerializers.Where(x => x.IsTypeSupported(type)).FirstOrDefault();
-
-        if (serializer is not null)
-            return serializer;
+        // A loop, not a query: a lambda capturing the type would be set aside on every lookup, found or not.
+        foreach (var serializer in Volatile.Read(ref _genericSerializers))
+            if (serializer.IsTypeSupported(type))
+                return serializer;
 
         return null;
     }
@@ -224,42 +229,67 @@ public static class Serializer
     /// <param name="cancellationToken">Cancellation token which allows to cancel the opertaion.</param>
     /// <returns>Task which can be awaited on.</returns>
     /// <exception cref="SerializationException">It is thrown when there is are some problems with the instance serialization.</exception>
-    public async static Task ToStreamAsync<T>(Stream stream, T? value, SerializationContext context, CancellationToken cancellationToken)
+    public async static ValueTask ToStreamAsync<T>(Stream stream, T? value, SerializationContext context, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(stream);
-        ArgumentNullException.ThrowIfNull(cancellationToken);
 
         if (context is null)
             context = SerializationContext.Default;
 
-        var st = typeof(T);
+        await WriteResolvedAsync(stream, value, Resolve(typeof(T), context), context, cancellationToken).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// How a value of one type is written and read in one context: the serializer found for it, the type that serializer is handed,
+    /// and whether a byte marks the value present. Found once, it serves every value of the type — every element of a collection.
+    /// </summary>
+    internal readonly record struct Resolved(ITypeSerializer Serializer, Type SerializedType, bool MarksPresence);
+
+    internal static Resolved Resolve(Type type, SerializationContext context)
+    {
+        var st = type;
         bool isNullable = false;
-        var serializer = context.FindTypeSerializer(typeof(T));
+        var serializer = context.FindTypeSerializer(st);
         if (serializer is null)
         {
             st = Nullable.GetUnderlyingType(st);
             if (st is null)
-                throw new SerializationException($"Cannot find serializer for type '{typeof(T)}'");
+                throw new SerializationException($"Cannot find serializer for type '{type}'");
 
-            serializer = context.FindTypeSerializer(st);
-            if (serializer is null)
-                throw new SerializationException($"Cannot find serializer for type neither '{typeof(T)}' nor '{st}'");
+            serializer = context.FindTypeSerializer(st) ??
+                throw new SerializationException($"Cannot find serializer for type neither '{type}' nor '{st}'");
 
             isNullable = true;
         }
 
+        return new Resolved(serializer, st, context.AllowNullValues && (type.IsClass || type.IsInterface || isNullable));
+    }
+
+    internal static async ValueTask WriteResolvedAsync<T>(Stream stream, T? value, Resolved resolved, SerializationContext context, CancellationToken cancellationToken)
+    {
         if (!context.AllowNullValues && value is null)
             throw new SerializationException("Cannot serialize null when context prohibits null values");
 
-        if (context.AllowNullValues && (typeof(T).IsClass || typeof(T).IsInterface || isNullable))
-            await stream.WriteAsync(new byte[]{ value is not null ? (byte)1 : (byte)0}, cancellationToken).ConfigureAwait(false);
+        if (resolved.MarksPresence)
+            await StreamBytes.WritePresenceAsync(stream, value is not null, cancellationToken).ConfigureAwait(false);
 
         if (value is null) return;
 
-        if (serializer is ITypeSerializer<T> typeSerializer)
-            await typeSerializer.ToStreamAsync(stream, value, context, cancellationToken);
+        if (resolved.Serializer is ITypeSerializer<T> typeSerializer)
+            await typeSerializer.ToStreamAsync(stream, value, context, cancellationToken).ConfigureAwait(false);
         else
-            await serializer.ToStreamAsync(stream, st, value, context, cancellationToken);
+            await resolved.Serializer.ToStreamAsync(stream, resolved.SerializedType, value, context, cancellationToken).ConfigureAwait(false);
+    }
+
+    internal static async ValueTask<T?> ReadResolvedAsync<T>(Stream stream, Resolved resolved, SerializationContext context, CancellationToken cancellationToken)
+    {
+        if (resolved.MarksPresence && !await StreamBytes.ReadPresenceAsync(stream, cancellationToken).ConfigureAwait(false))
+            return default;
+
+        if (resolved.Serializer is ITypeSerializer<T> typeSerializer)
+            return await typeSerializer.FromStreamAsync(stream, context, cancellationToken).ConfigureAwait(false);
+
+        return (T)await resolved.Serializer.FromStreamAsync(stream, resolved.SerializedType, context, cancellationToken).ConfigureAwait(false);
     }
 
     /// <summary>
@@ -272,40 +302,25 @@ public static class Serializer
     /// <param name="cancellationToken">Cancellation token which allows to cancel the opertaion.</param>
     /// <returns>Task which can be awaited on.</returns>
     /// <exception cref="SerializationException">It is thrown when there is are some problems with the instance serialization.</exception>
-    public static async Task ToStreamAsync(Stream stream, Type type, object? value, SerializationContext context, CancellationToken cancellationToken)
+    public static async ValueTask ToStreamAsync(Stream stream, Type type, object? value, SerializationContext context, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(stream);
         ArgumentNullException.ThrowIfNull(type);
-        ArgumentNullException.ThrowIfNull(cancellationToken);
 
         if (context is null)
             context = SerializationContext.Default;
 
-        var st = type;
-        bool isNullable = false;
-        var serializer = context.FindTypeSerializer(st);
-        if (serializer is null)
-        {
-            st = Nullable.GetUnderlyingType(st);
-            if (st is null)
-                throw new SerializationException($"Cannot find serializer for type '{type}'");
-
-            serializer = context.FindTypeSerializer(st);
-            if (serializer is null)
-                throw new SerializationException($"Cannot find serializer for type neither '{type}' nor '{st}'");
-
-            isNullable = true;
-        }
+        var resolved = Resolve(type, context);
 
         if (!context.AllowNullValues && value is null)
             throw new SerializationException("Cannot serialize null when context prohibits null values");
 
-        if (context.AllowNullValues && (type.IsClass || type.IsInterface || isNullable))
-            await stream.WriteAsync(new byte[]{ value is not null ? (byte)1 : (byte)0}, cancellationToken).ConfigureAwait(false);
+        if (resolved.MarksPresence)
+            await StreamBytes.WritePresenceAsync(stream, value is not null, cancellationToken).ConfigureAwait(false);
 
         if (value is null) return;
 
-        await serializer.ToStreamAsync(stream, st, value, context, cancellationToken);
+        await resolved.Serializer.ToStreamAsync(stream, resolved.SerializedType, value, context, cancellationToken).ConfigureAwait(false);
     }
 
     /// <summary>
@@ -317,41 +332,14 @@ public static class Serializer
     /// <param name="cancellationToken">Cancellation token which allows to cancel the opertaion.</param>
     /// <returns>Task which can be awaited on and where the loaded instance of the type can be aquired from.</returns>
     /// <exception cref="SerializationException">It is thrown when there is are some problems with the instance serialization.</exception>
-    public async static Task<T?> FromStreamAsync<T>(Stream stream, SerializationContext context, CancellationToken cancellationToken)
+    public async static ValueTask<T?> FromStreamAsync<T>(Stream stream, SerializationContext context, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(stream);
-        ArgumentNullException.ThrowIfNull(cancellationToken);
 
         if (context is null)
             context = SerializationContext.Default;
 
-        var st = typeof(T);
-        bool isNullable = false;
-        
-        var serializer = context.FindTypeSerializer(st);
-        if (serializer is null)
-        {
-            st = Nullable.GetUnderlyingType(st);
-            if (st is null)
-                throw new SerializationException($"Cannot find serializer for type '{typeof(T)}'");
-
-            serializer = context.FindTypeSerializer(st) ?? 
-                throw new SerializationException($"Cannot find serializer for type neither '{typeof(T)}' nor '{st}'");
-
-            isNullable = true;
-        }
-
-        if (context.AllowNullValues && (typeof(T).IsClass || typeof(T).IsInterface || isNullable))
-        {
-            var buf = new byte[1];
-            var len = await stream.ReadAsync(buf, cancellationToken);
-            if (len != 1)
-                throw new SerializationException($"Failed to read neccessary data from stream");
-
-            if (buf[0] == 0) return default;
-        }
-
-        return (T)await serializer.FromStreamAsync(stream, st, context, cancellationToken);
+        return await ReadResolvedAsync<T>(stream, Resolve(typeof(T), context), context, cancellationToken).ConfigureAwait(false);
     }
 
     /// <summary>
@@ -363,41 +351,19 @@ public static class Serializer
     /// <param name="cancellationToken">Cancellation token which allows to cancel the opertaion.</param>
     /// <returns>Task which can be awaited on and where the loaded instance of the type can be aquired from.</returns>
     /// <exception cref="SerializationException">It is thrown when there is are some problems with the instance serialization.</exception>
-    public async static Task<object?> FromStreamAsync(Stream stream, Type type, SerializationContext context, CancellationToken cancellationToken)
+    public async static ValueTask<object?> FromStreamAsync(Stream stream, Type type, SerializationContext context, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(stream);
         ArgumentNullException.ThrowIfNull(type);
-        ArgumentNullException.ThrowIfNull(cancellationToken);
 
         if (context is null)
             context = SerializationContext.Default;
 
-        var st = type;
-        bool isNullable = false;
+        var resolved = Resolve(type, context);
 
-        var serializer = context.FindTypeSerializer(st);
-        if (serializer is null)
-        {
-            st = Nullable.GetUnderlyingType(st);
-            if (st is null)
-                throw new SerializationException($"Cannot find serializer for type '{type}'");
+        if (resolved.MarksPresence && !await StreamBytes.ReadPresenceAsync(stream, cancellationToken).ConfigureAwait(false))
+            return default;
 
-            serializer = context.FindTypeSerializer(st) ?? 
-                throw new SerializationException($"Cannot find serializer for type neither '{type}' nor '{st}'");
-
-            isNullable = true;
-        }
-
-        if (context.AllowNullValues && (type.IsClass || type.IsInterface || isNullable))
-        {
-            var buf = new byte[1];
-            var len = await stream.ReadAsync(buf, cancellationToken);
-            if (len != 1)
-                throw new SerializationException($"Failed to read neccessary data from stream");
-
-            if (buf[0] == 0) return default;
-        }
-
-        return await serializer.FromStreamAsync(stream, st, context, cancellationToken);
+        return await resolved.Serializer.FromStreamAsync(stream, resolved.SerializedType, context, cancellationToken).ConfigureAwait(false);
    }
 }

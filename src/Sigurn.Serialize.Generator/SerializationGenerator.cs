@@ -51,18 +51,18 @@ namespace Sigurn.Serialize.Generator
             StringBuilder toStreamStringBuilder = new StringBuilder();
             StringBuilder fromStreamStringBuilder = new StringBuilder();
             if (tti.Properties.Count != 0)
-                toStreamStringBuilder.Append($"    public async Task ToStreamAsync(Stream stream, {tti.TypeNamespace}.{tti.TypeName} value, SerializationContext context, CancellationToken cancellationToken)\n");
+                toStreamStringBuilder.Append($"    public async ValueTask ToStreamAsync(Stream stream, {tti.TypeNamespace}.{tti.TypeName} value, SerializationContext context, CancellationToken cancellationToken)\n");
             else
-                toStreamStringBuilder.Append($"    public Task ToStreamAsync(Stream stream, {tti.TypeNamespace}.{tti.TypeName} value, SerializationContext context, CancellationToken cancellationToken)\n");
+                toStreamStringBuilder.Append($"    public ValueTask ToStreamAsync(Stream stream, {tti.TypeNamespace}.{tti.TypeName} value, SerializationContext context, CancellationToken cancellationToken)\n");
             toStreamStringBuilder.Append("    {\n");
             toStreamStringBuilder.Append("        ArgumentNullException.ThrowIfNull(stream);\n");
             toStreamStringBuilder.Append("        ArgumentNullException.ThrowIfNull(context);\n");
             toStreamStringBuilder.Append("\n");
 
             if (tti.Properties.Count != 0)
-                fromStreamStringBuilder.Append($"    public async Task<{tti.TypeNamespace}.{tti.TypeName}> FromStreamAsync(Stream stream, SerializationContext context, CancellationToken cancellationToken)\n");
+                fromStreamStringBuilder.Append($"    public async ValueTask<{tti.TypeNamespace}.{tti.TypeName}> FromStreamAsync(Stream stream, SerializationContext context, CancellationToken cancellationToken)\n");
             else
-                fromStreamStringBuilder.Append($"    public Task<{tti.TypeNamespace}.{tti.TypeName}> FromStreamAsync(Stream stream, SerializationContext context, CancellationToken cancellationToken)\n");
+                fromStreamStringBuilder.Append($"    public ValueTask<{tti.TypeNamespace}.{tti.TypeName}> FromStreamAsync(Stream stream, SerializationContext context, CancellationToken cancellationToken)\n");
             fromStreamStringBuilder.Append("    {\n");
             fromStreamStringBuilder.Append("        ArgumentNullException.ThrowIfNull(stream);\n");
             fromStreamStringBuilder.Append("        ArgumentNullException.ThrowIfNull(context);\n");
@@ -70,7 +70,7 @@ namespace Sigurn.Serialize.Generator
             if (tti.Properties.Count != 0)
                 fromStreamStringBuilder.Append($"        return new {tti.TypeNamespace}.{tti.TypeName}()\n");
             else
-                fromStreamStringBuilder.Append($"        return Task.FromResult(new {tti.TypeNamespace}.{tti.TypeName}()\n");
+                fromStreamStringBuilder.Append($"        return ValueTask.FromResult(new{tti.TypeNamespace}.{tti.TypeName}()\n");
             fromStreamStringBuilder.Append("        {\n");
 
             foreach (var p in tti.Properties.OrderBy(x => x.OrderId))
@@ -80,7 +80,7 @@ namespace Sigurn.Serialize.Generator
             }
 
             if (tti.Properties.Count == 0)
-                toStreamStringBuilder.Append($"        return Task.CompletedTask;\n");
+                toStreamStringBuilder.Append($"        return ValueTask.CompletedTask;\n");
 
             toStreamStringBuilder.Append("    }\n");
 

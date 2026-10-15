@@ -20,7 +20,7 @@ internal sealed class TestClassSerializer : ITypeSerializer<MyCode.TestClass>
     {
     }
 
-    public async Task ToStreamAsync(Stream stream, MyCode.TestClass value, SerializationContext context, CancellationToken cancellationToken)
+    public async ValueTask ToStreamAsync(Stream stream, MyCode.TestClass value, SerializationContext context, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(stream);
         ArgumentNullException.ThrowIfNull(context);
@@ -31,7 +31,7 @@ internal sealed class TestClassSerializer : ITypeSerializer<MyCode.TestClass>
         await Serializer.ToStreamAsync<System.Collections.Generic.IList<System.Guid>>(stream, value.Prop4, context, cancellationToken);
     }
 
-    public async Task<MyCode.TestClass> FromStreamAsync(Stream stream, SerializationContext context, CancellationToken cancellationToken)
+    public async ValueTask<MyCode.TestClass> FromStreamAsync(Stream stream, SerializationContext context, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(stream);
         ArgumentNullException.ThrowIfNull(context);

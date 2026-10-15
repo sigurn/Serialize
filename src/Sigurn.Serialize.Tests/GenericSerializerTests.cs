@@ -6,13 +6,13 @@ class IntSerializer : ITypeSerializer<int>
 {
     private readonly ByteOrder convByteOrder = BitConverter.IsLittleEndian ? ByteOrder.LittleEndian : ByteOrder.BigEndian;
 
-    public async Task<int> FromStreamAsync(Stream stream, SerializationContext context, CancellationToken cancellationToken)
+    public async ValueTask<int> FromStreamAsync(Stream stream, SerializationContext context, CancellationToken cancellationToken)
     {
-        return await ReadTypeFromStream(stream, 4, 
+        return await ReadTypeFromStream(stream, 4,
             buf => BitConverter.ToInt32(convByteOrder != context.ByteOrder ? buf.Reverse().ToArray() : buf), cancellationToken);
     }
 
-    public async Task ToStreamAsync(Stream stream, int value, SerializationContext context, CancellationToken cancellationToken)
+    public async ValueTask ToStreamAsync(Stream stream, int value, SerializationContext context, CancellationToken cancellationToken)
     {
         var buf = BitConverter.GetBytes(value);
         if (convByteOrder != context.ByteOrder)
@@ -97,7 +97,7 @@ public class GenericSerializerTests
         };
 
         using var stream = new MemoryStream();
-        await Assert.ThrowsAsync<SerializationException>(() => Serializer.ToStreamAsync<int?>(stream, null, context, CancellationToken.None));
+        await Assert.ThrowsAsync<SerializationException>(() => Serializer.ToStreamAsync<int?>(stream, null, context, CancellationToken.None).AsTask());
     }
 
     [Fact]

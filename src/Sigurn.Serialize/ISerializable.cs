@@ -28,7 +28,7 @@ public interface ISerializable
     /// where you should store the object's data.</para>
     /// <note type="implementnotes">To implement this method it's stronly recommended to use <see cref="Serialize.ValueToStream{T}"/> method.</note>
     /// </remarks>
-    Task ToStreamAsync(Stream stream, SerializationContext context, CancellationToken cancellationToken);
+    ValueTask ToStreamAsync(Stream stream, SerializationContext context, CancellationToken cancellationToken);
 
     /// <summary>
     /// Deserializes object from stream.
@@ -41,5 +41,5 @@ public interface ISerializable
     /// should be set at the byte following the last byte of the object's data.</para>
     /// <note type="implementnotes">To implement this method it's strongly recommended to use <see cref="Serializer.FromStreamAsync{T}(System.IO.Stream)"/> method.</note>
     /// </remarks>
-    Task FromStreamAsync(Stream stream, SerializationContext context, CancellationToken cancellationToken);
+    ValueTask FromStreamAsync(Stream stream, SerializationContext context, CancellationToken cancellationToken);
 };

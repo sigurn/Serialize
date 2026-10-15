@@ -10,12 +10,11 @@ class KeyValuePairSerializer : IGeneralSerializer
         return type.IsGenericType && type.GetGenericTypeDefinition() == typeof(KeyValuePair<,>);
     }
     
-    public async Task<object> FromStreamAsync(Stream stream, Type type, SerializationContext context, CancellationToken cancellationToken)
+    public async ValueTask<object> FromStreamAsync(Stream stream, Type type, SerializationContext context, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(stream);
         ArgumentNullException.ThrowIfNull(type);
         ArgumentNullException.ThrowIfNull(context);
-        ArgumentNullException.ThrowIfNull(cancellationToken);
 
         if (!IsTypeSupported(type))
             throw new SerializationException($"This serializer does not support type {type}");
@@ -32,12 +31,11 @@ class KeyValuePairSerializer : IGeneralSerializer
         return ctor.Invoke([key, value]);
     }
 
-    public async Task ToStreamAsync(Stream stream, Type type, object value, SerializationContext context, CancellationToken cancellationToken)
+    public async ValueTask ToStreamAsync(Stream stream, Type type, object value, SerializationContext context, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(stream);
         ArgumentNullException.ThrowIfNull(type);
         ArgumentNullException.ThrowIfNull(context);
-        ArgumentNullException.ThrowIfNull(cancellationToken);
 
         if (!IsTypeSupported(type))
             throw new SerializationException($"This serializer does not support type {type}");

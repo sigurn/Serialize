@@ -20,20 +20,20 @@ internal sealed class TestClassSerializer : ITypeSerializer<MyCode.TestClass>
     {
     }
 
-    public Task ToStreamAsync(Stream stream, MyCode.TestClass value, SerializationContext context, CancellationToken cancellationToken)
+    public ValueTask ToStreamAsync(Stream stream, MyCode.TestClass value, SerializationContext context, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(stream);
         ArgumentNullException.ThrowIfNull(context);
 
-        return Task.CompletedTask;
+        return ValueTask.CompletedTask;
     }
 
-    public Task<MyCode.TestClass> FromStreamAsync(Stream stream, SerializationContext context, CancellationToken cancellationToken)
+    public ValueTask<MyCode.TestClass> FromStreamAsync(Stream stream, SerializationContext context, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(stream);
         ArgumentNullException.ThrowIfNull(context);
 
-        return Task.FromResult(new MyCode.TestClass()
+        return ValueTask.FromResult(new MyCode.TestClass()
         {
         });
     }

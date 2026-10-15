@@ -20,20 +20,20 @@ internal sealed class EmptyClassSerializer : ITypeSerializer<MyCode.EmptyClass>
     {
     }
 
-    public Task ToStreamAsync(Stream stream, MyCode.EmptyClass value, SerializationContext context, CancellationToken cancellationToken)
+    public ValueTask ToStreamAsync(Stream stream, MyCode.EmptyClass value, SerializationContext context, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(stream);
         ArgumentNullException.ThrowIfNull(context);
 
-        return Task.CompletedTask;
+        return ValueTask.CompletedTask;
     }
 
-    public Task<MyCode.EmptyClass> FromStreamAsync(Stream stream, SerializationContext context, CancellationToken cancellationToken)
+    public ValueTask<MyCode.EmptyClass> FromStreamAsync(Stream stream, SerializationContext context, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(stream);
         ArgumentNullException.ThrowIfNull(context);
 
-        return Task.FromResult(new MyCode.EmptyClass()
+        return ValueTask.FromResult(new MyCode.EmptyClass()
         {
         });
     }

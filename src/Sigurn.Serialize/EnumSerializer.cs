@@ -5,11 +5,10 @@ namespace Sigurn.Serialize;
 
 class EnumSerializer : IGeneralSerializer
 {
-    public async Task<object> FromStreamAsync(Stream stream, Type type, SerializationContext context, CancellationToken cancellationToken)
+    public async ValueTask<object> FromStreamAsync(Stream stream, Type type, SerializationContext context, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(stream);
         ArgumentNullException.ThrowIfNull(type);
-        ArgumentNullException.ThrowIfNull(cancellationToken);
 
         if (!type.IsEnum)
             throw new ArgumentException($"The enum serializer cannot serialize type '{type}'");
@@ -31,11 +30,10 @@ class EnumSerializer : IGeneralSerializer
         return type.IsEnum;
     }
 
-    public async Task ToStreamAsync(Stream stream, Type type, object value, SerializationContext context, CancellationToken cancellationToken)
+    public async ValueTask ToStreamAsync(Stream stream, Type type, object value, SerializationContext context, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(stream);
         ArgumentNullException.ThrowIfNull(type);
-        ArgumentNullException.ThrowIfNull(cancellationToken);
 
         var underlyingType = Enum.GetUnderlyingType(type);
         await Serializer.ToStreamAsync(stream, underlyingType, Convert.ChangeType(value, underlyingType), context, cancellationToken);
