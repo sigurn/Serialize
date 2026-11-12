@@ -48,6 +48,8 @@ namespace Sigurn.Serialize.Generator
             defaultSeverity: DiagnosticSeverity.Warning,
             isEnabledByDefault: true);
 
+        private const string _serializerTypeName = "Sigurn.Serialize.Serializer";
+
         // Generic types the library serializes, by metadata name, and the Serializer helper that makes each serializable without reflection.
         private static readonly Dictionary<string, string> _registrationHelpers = new Dictionary<string, string>
         {
@@ -109,18 +111,106 @@ namespace Sigurn.Serialize.Generator
                 .Select((options, _) => options.GlobalOptions.TryGetValue(_enableAotAnalyzerProperty, out var value) &&
                     string.Equals(value, "true", StringComparison.OrdinalIgnoreCase));
 
-            context.RegisterSourceOutput(serializableInfos.Combine(aot), (spc, source) =>
+            // The compilation is joined only to place a diagnostic in its source, where #pragma and .editorconfig can silence it.
+            context.RegisterSourceOutput(serializableInfos.Combine(aot).Combine(context.CompilationProvider), (spc, source) =>
             {
-                if (!source.Right)
+                if (!source.Left.Right)
                     return;
 
                 // A partial type is declared more than once, and reported once.
-                foreach (var info in source.Left.Where(i => i.Problem is not null).GroupBy(i => i.Name).Select(g => g.First()))
+                foreach (var info in source.Left.Left.Where(i => i.Problem is not null).GroupBy(i => i.Name).Select(g => g.First()))
                     spc.ReportDiagnostic(Diagnostic.Create(SerializableNotConstructible,
-                        Location.Create(info.FilePath, info.Span, info.LineSpan), info.Name.Replace("global::", string.Empty), info.Problem));
+                        ToLocation(source.Right, info.FilePath, info.Span, info.LineSpan), info.Name.Replace("global::", string.Empty), info.Problem));
             });
 
             context.RegisterSourceOutput(serializableTypes, (spc, names) => ExecuteSerializableRegistrations(names, spc));
+
+            // Every type the code hands to Serializer.ToStreamAsync or FromStreamAsync is registered too, so a collection serialized only by
+            // hand (inside ISerializable, say) needs no registration of its own. A type not known at build time (an open T, a Type held in a
+            // variable) is left to the registrations of the code that knows it; the strict mode (SigurnSerializeReflection=false) catches one missed.
+            IncrementalValueProvider<EquatableArray<string>> callSiteRegistrations = context.SyntaxProvider
+                .CreateSyntaxProvider
+                (
+                    predicate: (s, _) => s is InvocationExpressionSyntax { Expression: MemberAccessExpressionSyntax { Name.Identifier.ValueText: "ToStreamAsync" or "FromStreamAsync" } },
+                    transform: (ctx, _) => GetCallSiteRegistrations(ctx.SemanticModel, (InvocationExpressionSyntax)ctx.Node)
+                )
+                .Where(registrations => registrations.Count != 0)
+                .Collect()
+                .Select((all, _) => new EquatableArray<string>(all.SelectMany(r => r)
+                    .Distinct().OrderBy(r => r, StringComparer.Ordinal).ToArray()));
+
+            context.RegisterSourceOutput(callSiteRegistrations, (spc, registrations) => ExecuteCallSiteRegistrations(registrations, spc));
+        }
+
+        private static Location ToLocation(Compilation compilation, string filePath, TextSpan span, LinePositionSpan lineSpan)
+        {
+            var tree = compilation.SyntaxTrees.FirstOrDefault(t => t.FilePath == filePath);
+            return tree is not null ? Location.Create(tree, span) : Location.Create(filePath, span, lineSpan);
+        }
+
+        private static EquatableArray<string> GetCallSiteRegistrations(SemanticModel semanticModel, InvocationExpressionSyntax invocation)
+        {
+            if (semanticModel.GetSymbolInfo(invocation).Symbol is not IMethodSymbol method ||
+                method.ContainingType is null || MetadataName(method.ContainingType) != _serializerTypeName)
+                return default;
+
+            ITypeSymbol? type = null;
+            if (method.IsGenericMethod)
+            {
+                type = method.TypeArguments[0];
+            }
+            else
+            {
+                // The Type overloads: only a typeof(...) is known at build time.
+                var parameter = method.Parameters.FirstOrDefault(p => p.Name == "type");
+                if (parameter is null)
+                    return default;
+
+                var argument = invocation.ArgumentList.Arguments.FirstOrDefault(a => a.NameColon?.Name.Identifier.ValueText == "type")
+                    ?? (parameter.Ordinal < invocation.ArgumentList.Arguments.Count ? invocation.ArgumentList.Arguments[parameter.Ordinal] : null);
+                if (argument?.Expression is TypeOfExpressionSyntax typeOf)
+                    type = semanticModel.GetTypeInfo(typeOf.Type).Type;
+            }
+
+            if (type is null || ContainsTypeParameter(type))
+                return default;
+
+            var registrations = new List<string>();
+            CollectRegistrations(type, registrations, new HashSet<string>());
+            return new EquatableArray<string>(registrations.ToArray());
+        }
+
+        private static bool ContainsTypeParameter(ITypeSymbol type) => type switch
+        {
+            ITypeParameterSymbol => true,
+            IArrayTypeSymbol array => ContainsTypeParameter(array.ElementType),
+            INamedTypeSymbol named => named.TypeArguments.Any(ContainsTypeParameter),
+            _ => false,
+        };
+
+        private static void ExecuteCallSiteRegistrations(EquatableArray<string> registrations, SourceProductionContext context)
+        {
+            if (registrations.Count == 0)
+                return;
+
+            StringBuilder sb = new StringBuilder();
+            sb.Append("using System.Runtime.CompilerServices;\n");
+            sb.Append("\n");
+            sb.Append("using Sigurn.Serialize;\n");
+            sb.Append("\n");
+            sb.Append("namespace Sigurn.Serialize.Generated;\n");
+            sb.Append("\n");
+            sb.Append("internal static class SerializerCallSiteRegistrations\n");
+            sb.Append("{\n");
+            sb.Append("    [ModuleInitializer]\n");
+            sb.Append("    internal static void Initializer()\n");
+            sb.Append("    {\n");
+            foreach (var registration in registrations)
+                sb.Append($"        {registration}\n");
+            sb.Append("    }\n");
+            sb.Append("}\n");
+
+            context.AddSource("SerializerCallSiteRegistrations.g.cs", SourceText.From(sb.ToString(), Encoding.UTF8));
         }
 
         private static void ExecuteSerializableRegistrations(EquatableArray<string> names, SourceProductionContext context)

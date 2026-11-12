@@ -220,6 +220,26 @@ public sealed class WithoutReflectionTests : IDisposable
         }
     }
 
+    // SigurnSerializeReflection=false reaches the library as this switch; it is read once, at start, so the reading is what is tested here.
+    [Fact]
+    public void TheReflectionSwitch_IsOnUnlessSetOff()
+    {
+        try
+        {
+            Assert.True(Serializer.ReadReflectionSwitch());
+
+            AppContext.SetSwitch(Serializer.ReflectionSwitchName, false);
+            Assert.False(Serializer.ReadReflectionSwitch());
+
+            AppContext.SetSwitch(Serializer.ReflectionSwitchName, true);
+            Assert.True(Serializer.ReadReflectionSwitch());
+        }
+        finally
+        {
+            AppContext.SetSwitch(Serializer.ReflectionSwitchName, true);
+        }
+    }
+
     [Fact]
     public async Task AnEnum_NeedsNoRegistration()
     {

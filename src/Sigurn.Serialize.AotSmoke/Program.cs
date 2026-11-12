@@ -30,6 +30,13 @@ Check(read.Tags.SequenceEqual(order.Tags), "Tags");
 Check(read.Pair.Equals(order.Pair), "Pair");
 Check(read.Matrix.Length == 2 && read.Matrix[0].SequenceEqual([1, 2]) && read.Matrix[1].SequenceEqual([3]), "Matrix");
 
+// Serialized only by hand, inside ISerializable, and registered nowhere: the generator registers Queue<Guid> from the call itself.
+var shipment = new Shipment();
+shipment.Parcels.Enqueue(Guid.NewGuid());
+shipment.Parcels.Enqueue(Guid.NewGuid());
+var shipped = await RoundTripAsync(shipment);
+Check(shipped is not null && shipped.Parcels.SequenceEqual(shipment.Parcels), "Shipment");
+
 var customer = await RoundTripAsync(new Customer { Name = "Bob" });
 Check(customer?.Name == "Bob", "Customer on its own");
 
@@ -75,6 +82,17 @@ namespace Sigurn.Serialize.AotSmoke
 
         public async ValueTask FromStreamAsync(Stream stream, SerializationContext context, CancellationToken cancellationToken) =>
             Name = await Serializer.FromStreamAsync<string>(stream, context, cancellationToken) ?? string.Empty;
+    }
+
+    public sealed class Shipment : ISerializable
+    {
+        public Queue<Guid> Parcels { get; set; } = new();
+
+        public ValueTask ToStreamAsync(Stream stream, SerializationContext context, CancellationToken cancellationToken) =>
+            Serializer.ToStreamAsync(stream, Parcels, context, cancellationToken);
+
+        public async ValueTask FromStreamAsync(Stream stream, SerializationContext context, CancellationToken cancellationToken) =>
+            Parcels = await Serializer.FromStreamAsync<Queue<Guid>>(stream, context, cancellationToken) ?? new();
     }
 
     [GenerateSerializer]

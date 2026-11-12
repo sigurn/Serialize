@@ -28,7 +28,19 @@ public static class Serializer
     // at run time, so where that cannot be done (Native AOT) the trimmer drops them and such a type is refused with a hint what to register.
     internal static bool ReflectionFallbackDisabled { get; set; }
 
-    private static bool UseReflectionFallback => RuntimeFeature.IsDynamicCodeSupported && !ReflectionFallbackDisabled;
+    private static bool UseReflectionFallback => RuntimeFeature.IsDynamicCodeSupported && IsReflectionEnabled && !ReflectionFallbackDisabled;
+
+    internal const string ReflectionSwitchName = "Sigurn.Serialize.IsReflectionEnabled";
+
+    // Off where the project sets <SigurnSerializeReflection>false</SigurnSerializeReflection> (and by default where it publishes with Native AOT):
+    // then a JIT run — the tests of the project — refuses a type nothing registered just as the AOT build does, instead of reading it by reflection.
+#if NET9_0_OR_GREATER
+    [System.Diagnostics.CodeAnalysis.FeatureSwitchDefinition(ReflectionSwitchName)]
+#endif
+    private static bool IsReflectionEnabled { get; } = ReadReflectionSwitch();
+
+    internal static bool ReadReflectionSwitch() =>
+        !AppContext.TryGetSwitch(ReflectionSwitchName, out var enabled) || enabled;
 
     private static IGeneralSerializer[] _genericSerializers =
     [
@@ -425,7 +437,7 @@ public static class Serializer
     private static string RegistrationHint(Type type) =>
         UseReflectionFallback
             ? string.Empty
-            : $". Reflection is not available (Native AOT): mark the type that holds it with [GenerateSerializer] or register it, e.g. with Serializer.RegisterList<T>(), RegisterDictionary<TKey, TValue>() or RegisterSerializable<T>().";
+            : $". Reflection is off (Native AOT, or SigurnSerializeReflection=false): mark the type that holds it with [GenerateSerializer] or register it, e.g. with Serializer.RegisterList<T>(), RegisterDictionary<TKey, TValue>() or RegisterSerializable<T>().";
 
     internal static async ValueTask WriteResolvedAsync<T>(Stream stream, T? value, Resolved resolved, SerializationContext context, CancellationToken cancellationToken)
     {

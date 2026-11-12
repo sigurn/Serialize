@@ -1,0 +1,15 @@
+<Project>
+  <!--
+    SigurnSerializeReflection=false turns off the reflective serializers of Sigurn.Serialize, so a JIT run (the tests of the project) refuses
+    a type nothing registered just as a Native AOT build does. A project publishing with Native AOT has it off unless it says otherwise.
+  -->
+  <PropertyGroup>
+    <SigurnSerializeReflection Condition="'$(SigurnSerializeReflection)' == '' And '$(PublishAot)' == 'true'">false</SigurnSerializeReflection>
+  </PropertyGroup>
+
+  <ItemGroup Condition="'$(SigurnSerializeReflection)' != ''">
+    <RuntimeHostConfigurationOption Include="Sigurn.Serialize.IsReflectionEnabled"
+                                    Value="$(SigurnSerializeReflection)"
+                                    Trim="true" />
+  </ItemGroup>
+</Project>

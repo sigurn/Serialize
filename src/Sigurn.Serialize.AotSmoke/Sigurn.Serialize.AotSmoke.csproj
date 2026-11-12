@@ -20,4 +20,7 @@
                       ReferenceOutputAssembly="false" />
   </ItemGroup>
 
+  <!-- A ProjectReference does not bring the package's build files, so they are imported as a consumer of the package gets them. -->
+  <Import Project="../Sigurn.Serialize/build/Sigurn.Serialize.targets" />
+
 </Project>
