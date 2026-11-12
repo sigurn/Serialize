@@ -1,6 +1,3 @@
-
-using System.Reflection.Metadata;
-
 namespace Sigurn.Serialize;
 
 class EnumSerializer : IGeneralSerializer
@@ -18,9 +15,11 @@ class EnumSerializer : IGeneralSerializer
         if (value is null)
             throw new SerializationException($"Cannot deserialize null as instance of '{type}' enum.");
 
+        // Compared as the underlying values: no array of the enum type has to be made, so this holds where code cannot be made at run time.
+        foreach (var v in Enum.GetValuesAsUnderlyingType(type))
+            if (v.Equals(value)) return Enum.ToObject(type, value);
+
         var res = Enum.ToObject(type, value);
-        foreach(var v in Enum.GetValues(type))
-            if (v.Equals(res)) return res;
 
         throw new SerializationException($"Unknown value '{res}' for enum '{type}'");
     }

@@ -5,6 +5,7 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
     <AppendTargetFrameworkToOutputPath>true</AppendTargetFrameworkToOutputPath>
+    <IsAotCompatible>true</IsAotCompatible>
   </PropertyGroup>
 
   <PropertyGroup>
@@ -12,6 +13,10 @@
     <MinVerDefaultPreReleaseIdentifiers>dev</MinVerDefaultPreReleaseIdentifiers>
     <MinVerMinimumMajorMinor>99.99</MinVerMinimumMajorMinor>
   </PropertyGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="Sigurn.Serialize.Tests" />
+  </ItemGroup>
 
   <ItemGroup>
     <ProjectReference Include="../Sigurn.Serialize.Generator/Sigurn.Serialize.Generator.csproj"

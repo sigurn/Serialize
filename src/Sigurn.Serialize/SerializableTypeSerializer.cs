@@ -1,3 +1,4 @@
+using System.Diagnostics.CodeAnalysis;
 
 namespace Sigurn.Serialize;
 
@@ -10,6 +11,7 @@ sealed class SerializableTypeSerializer : ITypeSerializer
 
     public Type Type { get; }
 
+    [UnconditionalSuppressMessage("Trimming", "IL2067", Justification = "Reached only through the reflective fallback, which Serializer uses only when RuntimeFeature.IsDynamicCodeSupported; the generated code registers SerializableTypeSerializer<T> instead.")]
     public async ValueTask<object> FromStreamAsync(Stream stream, Type type, SerializationContext context, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(stream);

@@ -6,6 +6,8 @@
                  Targets="Restore" />
         <MSBuild Projects="Sigurn.Serialize.Tests/Sigurn.Serialize.Tests.csproj"
                  Targets="Restore" />
+        <MSBuild Projects="Sigurn.Serialize.AotSmoke/Sigurn.Serialize.AotSmoke.csproj"
+                 Targets="Restore" />
     </Target>
 
     <Target Name="Build" DependsOnTargets="Restore">
@@ -14,6 +16,8 @@
         <MSBuild Projects="Sigurn.Serialize/Sigurn.Serialize.csproj"
                  Targets="Build" />
         <MSBuild Projects="Sigurn.Serialize.Tests/Sigurn.Serialize.Tests.csproj"
+                 Targets="Build" />
+        <MSBuild Projects="Sigurn.Serialize.AotSmoke/Sigurn.Serialize.AotSmoke.csproj"
                  Targets="Build" />
 
         <MSBuild Projects="Sigurn.Serialize.IntegrationTests/Sigurn.Serialize.IntegrationTests.csproj"
@@ -30,6 +34,8 @@
     </Target>
 
     <Target Name="Clean">
+        <MSBuild Projects="Sigurn.Serialize.AotSmoke/Sigurn.Serialize.AotSmoke.csproj"
+                 Targets="Clean" />
         <MSBuild Projects="Sigurn.Serialize.IntegrationTests/Sigurn.Serialize.IntegrationTests.csproj"
                  Targets="Clean" />
         <MSBuild Projects="Sigurn.Serialize.Tests/Sigurn.Serialize.Tests.csproj"

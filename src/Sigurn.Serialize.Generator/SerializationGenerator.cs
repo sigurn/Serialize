@@ -1,5 +1,6 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.Collections.Immutable;
 using System.ComponentModel;
 using System.Linq;
 using System.Text;
@@ -18,9 +19,12 @@ namespace System.Runtime.CompilerServices
 
 namespace Sigurn.Serialize.Generator
 {
+    // A type of the compilation implementing ISerializable: registered when the generated code can make it, else reported where AOT is on.
+    readonly record struct SerializableTypeInfo(string Name, string? Problem, string FilePath, TextSpan Span, LinePositionSpan LineSpan);
+
     readonly record struct TypePropertyInfo(string Name, string Type, int OrderId);
 
-    readonly record struct TargetTypeInfo(string TypeNamespace, string TypeName, string SerializerNamespace, string SerializerName, bool UseGlobally, EquatableArray<TypePropertyInfo> Properties);
+    readonly record struct TargetTypeInfo(string TypeNamespace, string TypeName, string SerializerNamespace, string SerializerName, bool UseGlobally, EquatableArray<TypePropertyInfo> Properties, EquatableArray<string> Registrations);
 
     /// <summary>
     /// Serializer generator.
@@ -31,6 +35,45 @@ namespace Sigurn.Serialize.Generator
         private const string _generateSerializerAttributeName = "Sigurn.Serialize.GenerateSerializerAttribute";
         private const string _serializationIgnoreAttributeName = "Sigurn.Serialize.SerializeIgnoreAttribute";
         private const string _serializationOrderIdAttributeName = "Sigurn.Serialize.SerializeOrderAttribute";
+        private const string _serializableInterfaceName = "Sigurn.ISerializable";
+
+        // Set by the SDK when the project publishes with Native AOT or is marked IsAotCompatible, and visible to the compiler there.
+        private const string _enableAotAnalyzerProperty = "build_property.EnableAotAnalyzer";
+
+        internal static readonly DiagnosticDescriptor SerializableNotConstructible = new DiagnosticDescriptor(
+            id: "SGS001",
+            title: "ISerializable type cannot be serialized without reflection",
+            messageFormat: "Type '{0}' implements ISerializable but {1}, so it cannot be read under Native AOT; add a public or internal parameterless constructor, or register a serializer for it with Serializer.RegisterSerializer",
+            category: "Sigurn.Serialize",
+            defaultSeverity: DiagnosticSeverity.Warning,
+            isEnabledByDefault: true);
+
+        // Generic types the library serializes, by metadata name, and the Serializer helper that makes each serializable without reflection.
+        private static readonly Dictionary<string, string> _registrationHelpers = new Dictionary<string, string>
+        {
+            ["System.Collections.Generic.List`1"] = "RegisterList",
+            ["System.Collections.Generic.IList`1"] = "RegisterList",
+            ["System.Collections.Generic.ICollection`1"] = "RegisterList",
+            ["System.Collections.Generic.IReadOnlyList`1"] = "RegisterList",
+            ["System.Collections.Generic.IReadOnlyCollection`1"] = "RegisterList",
+            ["System.Collections.Generic.HashSet`1"] = "RegisterHashSet",
+            ["System.Collections.Generic.ISet`1"] = "RegisterHashSet",
+            ["System.Collections.Generic.IReadOnlySet`1"] = "RegisterHashSet",
+            ["System.Collections.Generic.Stack`1"] = "RegisterStack",
+            ["System.Collections.Generic.Queue`1"] = "RegisterQueue",
+            ["System.Collections.Generic.SortedSet`1"] = "RegisterSortedSet",
+            ["System.Collections.Generic.LinkedList`1"] = "RegisterLinkedList",
+            ["System.Collections.Immutable.ImmutableArray`1"] = "RegisterImmutableArray",
+            ["System.Collections.Immutable.ImmutableList`1"] = "RegisterImmutableList",
+            ["System.Collections.Immutable.IImmutableList`1"] = "RegisterImmutableList",
+            ["System.Collections.Immutable.ImmutableSortedSet`1"] = "RegisterImmutableSortedSet",
+            ["System.Collections.Generic.Dictionary`2"] = "RegisterDictionary",
+            ["System.Collections.Generic.IReadOnlyDictionary`2"] = "RegisterDictionary",
+            ["System.Collections.Generic.SortedDictionary`2"] = "RegisterSortedDictionary",
+            ["System.Collections.Generic.SortedList`2"] = "RegisterSortedList",
+            ["System.Collections.Immutable.ImmutableSortedDictionary`2"] = "RegisterImmutableSortedDictionary",
+            ["System.Collections.Generic.KeyValuePair`2"] = "RegisterKeyValuePair",
+        };
 
         /// <inheritdoc/>
         public void Initialize(IncrementalGeneratorInitializationContext context)
@@ -44,6 +87,65 @@ namespace Sigurn.Serialize.Generator
             );
             
             context.RegisterSourceOutput(typesToGenerateSerializer, (spc, source) => Execute(source, spc));
+
+            // Every type of the compilation that implements ISerializable is registered too, so it is serializable without reflection
+            // (Native AOT) wherever it is used, not only as the member of a type marked with GenerateSerializer.
+            IncrementalValueProvider<ImmutableArray<SerializableTypeInfo>> serializableInfos = context.SyntaxProvider
+                .CreateSyntaxProvider
+                (
+                    predicate: (s, _) => s is TypeDeclarationSyntax { BaseList: not null },
+                    transform: (ctx, _) => GetSerializableTypeInfo(ctx.SemanticModel, (TypeDeclarationSyntax)ctx.Node)
+                )
+                .Where(info => info is not null)
+                .Select((info, _) => info!.Value)
+                .Collect();
+
+            IncrementalValueProvider<EquatableArray<string>> serializableTypes = serializableInfos
+                .Select((infos, _) => new EquatableArray<string>(infos.Where(i => i.Problem is null).Select(i => i.Name)
+                    .Distinct().OrderBy(n => n, StringComparer.Ordinal).ToArray()));
+
+            // Only a project built for Native AOT hears about a type it cannot register: elsewhere reflection makes it, as it always did.
+            IncrementalValueProvider<bool> aot = context.AnalyzerConfigOptionsProvider
+                .Select((options, _) => options.GlobalOptions.TryGetValue(_enableAotAnalyzerProperty, out var value) &&
+                    string.Equals(value, "true", StringComparison.OrdinalIgnoreCase));
+
+            context.RegisterSourceOutput(serializableInfos.Combine(aot), (spc, source) =>
+            {
+                if (!source.Right)
+                    return;
+
+                // A partial type is declared more than once, and reported once.
+                foreach (var info in source.Left.Where(i => i.Problem is not null).GroupBy(i => i.Name).Select(g => g.First()))
+                    spc.ReportDiagnostic(Diagnostic.Create(SerializableNotConstructible,
+                        Location.Create(info.FilePath, info.Span, info.LineSpan), info.Name.Replace("global::", string.Empty), info.Problem));
+            });
+
+            context.RegisterSourceOutput(serializableTypes, (spc, names) => ExecuteSerializableRegistrations(names, spc));
+        }
+
+        private static void ExecuteSerializableRegistrations(EquatableArray<string> names, SourceProductionContext context)
+        {
+            if (names.Count == 0)
+                return;
+
+            StringBuilder sb = new StringBuilder();
+            sb.Append("using System.Runtime.CompilerServices;\n");
+            sb.Append("\n");
+            sb.Append("using Sigurn.Serialize;\n");
+            sb.Append("\n");
+            sb.Append("namespace Sigurn.Serialize.Generated;\n");
+            sb.Append("\n");
+            sb.Append("internal static class SerializableTypesRegistration\n");
+            sb.Append("{\n");
+            sb.Append("    [ModuleInitializer]\n");
+            sb.Append("    internal static void Initializer()\n");
+            sb.Append("    {\n");
+            foreach (var name in names)
+                sb.Append($"        Serializer.RegisterSerializable<{name}>();\n");
+            sb.Append("    }\n");
+            sb.Append("}\n");
+
+            context.AddSource("SerializableTypesRegistration.g.cs", SourceText.From(sb.ToString(), Encoding.UTF8));
         }
 
         private void Execute(TargetTypeInfo tti, SourceProductionContext context)
@@ -108,6 +210,8 @@ namespace Sigurn.Serialize.Generator
             sb.Append($"    [ModuleInitializer]\n");
             sb.Append($"    internal static void Initializer()\n");
             sb.Append("    {\n");
+            foreach (var registration in tti.Registrations)
+                sb.Append($"        {registration}\n");
             sb.Append($"        Serializer.RegisterSerializer<{tti.TypeNamespace}.{tti.TypeName}>(() => new {tti.SerializerName}(), {useGlobally});\n");
             sb.Append("    }\n");
             sb.Append("\n");
@@ -177,7 +281,18 @@ namespace Sigurn.Serialize.Generator
                     return true;
                 });
 
-            var props = new EquatableArray<TypePropertyInfo>(publicProps.Select(p =>
+            var publicPropList = publicProps.ToList();
+
+            var registrations = new List<string>();
+            var seen = new HashSet<string>();
+            foreach (var p in publicPropList)
+            {
+                var propType = semanticModel.GetTypeInfo(p.Type).Type;
+                if (propType is not null)
+                    CollectRegistrations(propType, registrations, seen);
+            }
+
+            var props = new EquatableArray<TypePropertyInfo>(publicPropList.Select(p =>
             {
                 var name = p.Identifier.Text;
                 var type = semanticModel.GetTypeInfo(p.Type).Type?.ToString() ?? string.Empty;
@@ -198,8 +313,112 @@ namespace Sigurn.Serialize.Generator
                 return new TypePropertyInfo(name, type, orderId);
             }).ToArray());
 
-            return new TargetTypeInfo(typeNamespace, typeName, serializerNamespace, serializerName, useGlobally, props);
+            return new TargetTypeInfo(typeNamespace, typeName, serializerNamespace, serializerName, useGlobally, props,
+                new EquatableArray<string>(registrations.ToArray()));
         }
+
+        // The Serializer.Register* calls that make the type of a member, and every type it is made of, serializable without reflection, so
+        // the generated serializer works where code cannot be made at run time (Native AOT). Each type is registered once per serializer.
+        private static void CollectRegistrations(ITypeSymbol type, List<string> registrations, HashSet<string> seen)
+        {
+            if (type is IArrayTypeSymbol array)
+            {
+                if (array.Rank != 1)
+                    return;
+
+                CollectRegistrations(array.ElementType, registrations, seen);
+                Add($"Serializer.RegisterArray<{Name(array.ElementType)}>();");
+                return;
+            }
+
+            if (type is not INamedTypeSymbol named || named.TypeKind == TypeKind.Error)
+                return;
+
+            if (named.IsGenericType)
+            {
+                if (named.OriginalDefinition.SpecialType == SpecialType.System_Nullable_T)
+                {
+                    CollectRegistrations(named.TypeArguments[0], registrations, seen);
+                    return;
+                }
+
+                if (!_registrationHelpers.TryGetValue(MetadataName(named.OriginalDefinition), out var helper))
+                    return;
+
+                if (named.TypeArguments.Any(a => a is ITypeParameterSymbol))
+                    return;
+
+                foreach (var argument in named.TypeArguments)
+                    CollectRegistrations(argument, registrations, seen);
+
+                Add($"Serializer.{helper}<{string.Join(", ", named.TypeArguments.Select(Name))}>();");
+                return;
+            }
+
+            if (IsSerializable(named))
+                Add($"Serializer.RegisterSerializable<{Name(named)}>();");
+
+            void Add(string registration)
+            {
+                if (seen.Add(registration))
+                    registrations.Add(registration);
+            }
+        }
+
+        private static SerializableTypeInfo? GetSerializableTypeInfo(SemanticModel semanticModel, TypeDeclarationSyntax syntax)
+        {
+            if (semanticModel.GetDeclaredSymbol(syntax) is not INamedTypeSymbol type)
+                return null;
+
+            if (type.IsAbstract || type.IsStatic || type.IsGenericType ||
+                (type.TypeKind != TypeKind.Class && type.TypeKind != TypeKind.Struct) ||
+                !type.AllInterfaces.Any(i => MetadataName(i) == _serializableInterfaceName))
+                return null;
+
+            string? problem = null;
+            if (!IsSerializable(type))
+            {
+                bool accessible = true;
+                for (INamedTypeSymbol? t = type; t is not null; t = t.ContainingType)
+                    accessible &= IsVisible(t.DeclaredAccessibility);
+
+                problem = accessible ? "has no public or internal parameterless constructor" : "is not accessible to generated code";
+            }
+
+            var location = syntax.Identifier.GetLocation();
+            return new SerializableTypeInfo(Name(type), problem, location.SourceTree?.FilePath ?? string.Empty, location.SourceSpan,
+                location.GetLineSpan().Span);
+        }
+
+        // A type implementing ISerializable that can be made without reflection: a struct, or a class that is not abstract and has a
+        // parameterless constructor the generated code can call.
+        private static bool IsSerializable(INamedTypeSymbol type)
+        {
+            if (type.IsAbstract || type.IsStatic || type.IsGenericType)
+                return false;
+
+            if (type.TypeKind != TypeKind.Class && type.TypeKind != TypeKind.Struct)
+                return false;
+
+            if (!type.AllInterfaces.Any(i => MetadataName(i) == _serializableInterfaceName))
+                return false;
+
+            for (INamedTypeSymbol? t = type; t is not null; t = t.ContainingType)
+                if (!IsVisible(t.DeclaredAccessibility))
+                    return false;
+
+            return type.TypeKind == TypeKind.Struct ||
+                type.InstanceConstructors.Any(c => c.Parameters.Length == 0 && IsVisible(c.DeclaredAccessibility));
+        }
+
+        private static bool IsVisible(Accessibility accessibility) =>
+            accessibility == Accessibility.Public || accessibility == Accessibility.Internal || accessibility == Accessibility.ProtectedOrInternal;
+
+        private static string MetadataName(INamedTypeSymbol type) =>
+            type.ContainingNamespace is { IsGlobalNamespace: false } ns ? $"{ns.ToDisplayString()}.{type.MetadataName}" : type.MetadataName;
+
+        private static string Name(ITypeSymbol type) =>
+            type.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat);
 
         private bool HasAttribute(MemberDeclarationSyntax memberDeclarartion, SemanticModel model, string fullAttrName)
         {

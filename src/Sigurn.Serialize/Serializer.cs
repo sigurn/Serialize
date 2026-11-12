@@ -1,5 +1,7 @@
 using System.Collections.Concurrent;
 using System.Collections.Frozen;
+using System.Collections.Immutable;
+using System.Runtime.CompilerServices;
 
 namespace Sigurn.Serialize;
 
@@ -17,6 +19,16 @@ public static class Serializer
 
     private static FrozenDictionary<Type, Lazy<ITypeSerializer>> _typeSerializers = FrozenDictionary<Type, Lazy<ITypeSerializer>>.Empty;
     private static FrozenDictionary<Type, Lazy<ITypeSerializer>> _globalTypeSerializers = FrozenDictionary<Type, Lazy<ITypeSerializer>>.Empty;
+
+    // Serializers of closed generic types registered by the Register* helpers — mostly by generated code. They are looked up after the
+    // serializers registered with RegisterSerializer, never refuse a later RegisterSerializer for the same type and are not seen by GetSerializer.
+    private static FrozenDictionary<Type, Lazy<ITypeSerializer>> _autoSerializers = FrozenDictionary<Type, Lazy<ITypeSerializer>>.Empty;
+
+    // Whether the reflective serializers (collections, key-value pairs, ISerializable) may be used for a type nothing registered. They make code
+    // at run time, so where that cannot be done (Native AOT) the trimmer drops them and such a type is refused with a hint what to register.
+    internal static bool ReflectionFallbackDisabled { get; set; }
+
+    private static bool UseReflectionFallback => RuntimeFeature.IsDynamicCodeSupported && !ReflectionFallbackDisabled;
 
     private static IGeneralSerializer[] _genericSerializers =
     [
@@ -174,6 +186,131 @@ public static class Serializer
         }
     }
 
+    private static void RegisterAuto(Type type, Func<ITypeSerializer> serializerFactory)
+    {
+        if (Volatile.Read(ref _autoSerializers).ContainsKey(type))
+            return;
+
+        lock (_registration)
+        {
+            if (!_autoSerializers.ContainsKey(type))
+                Volatile.Write(ref _autoSerializers, With(_autoSerializers, type, new Lazy<ITypeSerializer>(serializerFactory)));
+        }
+    }
+
+    private static void RegisterItems<TCollection, TItem>(Func<CollectionsSerializer.Items<TItem>, ReadItems> read)
+        where TCollection : IEnumerable<TItem> =>
+        RegisterAuto(typeof(TCollection), () => new ItemsSerializer<TCollection, TItem>(read));
+
+    private static void RegisterEntries<TCollection, TKey, TValue>(Func<CollectionsSerializer.Entries<TKey, TValue>, ReadItems> read)
+        where TCollection : IEnumerable<KeyValuePair<TKey, TValue>>
+        where TKey : notnull =>
+        RegisterAuto(typeof(TCollection), () => new EntriesSerializer<TCollection, TKey, TValue>(read));
+
+    /// <summary>Makes arrays of <typeparamref name="T"/> serializable without reflection (Native AOT).</summary>
+    /// <remarks>
+    /// <para>The Register* helpers make a closed generic type serializable without making code at run time. The serializers generated for
+    /// <see cref="GenerateSerializerAttribute"/> call them for the types of their members, so they are needed only for types used otherwise.</para>
+    /// <para>A serializer registered with <c>RegisterSerializer</c> for the same type takes precedence, and registering one twice does nothing.</para>
+    /// </remarks>
+    public static void RegisterArray<T>() =>
+        RegisterItems<T[], T>(static items => items.ArrayFromStreamAsync);
+
+    /// <summary>Makes <see cref="List{T}"/>, <see cref="IList{T}"/>, <see cref="ICollection{T}"/>, <see cref="IReadOnlyList{T}"/> and
+    /// <see cref="IReadOnlyCollection{T}"/> of <typeparamref name="T"/> serializable without reflection (Native AOT).</summary>
+    /// <remarks><inheritdoc cref="RegisterArray{T}" path="/remarks"/></remarks>
+    public static void RegisterList<T>()
+    {
+        RegisterItems<List<T>, T>(static items => items.ListFromStreamAsync);
+        RegisterItems<IList<T>, T>(static items => items.ListFromStreamAsync);
+        RegisterItems<ICollection<T>, T>(static items => items.ListFromStreamAsync);
+        RegisterItems<IReadOnlyList<T>, T>(static items => items.ListFromStreamAsync);
+        RegisterItems<IReadOnlyCollection<T>, T>(static items => items.ListFromStreamAsync);
+    }
+
+    /// <summary>Makes <see cref="HashSet{T}"/>, <see cref="ISet{T}"/> and <see cref="IReadOnlySet{T}"/> of <typeparamref name="T"/>
+    /// serializable without reflection (Native AOT).</summary>
+    /// <remarks><inheritdoc cref="RegisterArray{T}" path="/remarks"/></remarks>
+    public static void RegisterHashSet<T>()
+    {
+        RegisterItems<HashSet<T>, T>(static items => items.HashSetFromStreamAsync);
+        RegisterItems<ISet<T>, T>(static items => items.HashSetFromStreamAsync);
+        RegisterItems<IReadOnlySet<T>, T>(static items => items.HashSetFromStreamAsync);
+    }
+
+    /// <summary>Makes <see cref="Stack{T}"/> of <typeparamref name="T"/> serializable without reflection (Native AOT).</summary>
+    /// <remarks><inheritdoc cref="RegisterArray{T}" path="/remarks"/></remarks>
+    public static void RegisterStack<T>() =>
+        RegisterItems<Stack<T>, T>(static items => items.StackFromStreamAsync);
+
+    /// <summary>Makes <see cref="Queue{T}"/> of <typeparamref name="T"/> serializable without reflection (Native AOT).</summary>
+    /// <remarks><inheritdoc cref="RegisterArray{T}" path="/remarks"/></remarks>
+    public static void RegisterQueue<T>() =>
+        RegisterItems<Queue<T>, T>(static items => items.QueueFromStreamAsync);
+
+    /// <summary>Makes <see cref="SortedSet{T}"/> of <typeparamref name="T"/> serializable without reflection (Native AOT).</summary>
+    /// <remarks><inheritdoc cref="RegisterArray{T}" path="/remarks"/></remarks>
+    public static void RegisterSortedSet<T>() =>
+        RegisterItems<SortedSet<T>, T>(static items => items.SortedSetFromStreamAsync);
+
+    /// <summary>Makes <see cref="LinkedList{T}"/> of <typeparamref name="T"/> serializable without reflection (Native AOT).</summary>
+    /// <remarks><inheritdoc cref="RegisterArray{T}" path="/remarks"/></remarks>
+    public static void RegisterLinkedList<T>() =>
+        RegisterItems<LinkedList<T>, T>(static items => items.LinkedListFromStreamAsync);
+
+    /// <summary>Makes <see cref="ImmutableArray{T}"/> of <typeparamref name="T"/> serializable without reflection (Native AOT).</summary>
+    /// <remarks><inheritdoc cref="RegisterArray{T}" path="/remarks"/></remarks>
+    public static void RegisterImmutableArray<T>() =>
+        RegisterItems<ImmutableArray<T>, T>(static items => items.ImmutableArrayFromStreamAsync);
+
+    /// <summary>Makes <see cref="ImmutableList{T}"/> and <see cref="IImmutableList{T}"/> of <typeparamref name="T"/> serializable without
+    /// reflection (Native AOT).</summary>
+    /// <remarks><inheritdoc cref="RegisterArray{T}" path="/remarks"/></remarks>
+    public static void RegisterImmutableList<T>()
+    {
+        RegisterItems<ImmutableList<T>, T>(static items => items.ImmutableListFromStreamAsync);
+        RegisterItems<IImmutableList<T>, T>(static items => items.ImmutableListFromStreamAsync);
+    }
+
+    /// <summary>Makes <see cref="ImmutableSortedSet{T}"/> of <typeparamref name="T"/> serializable without reflection (Native AOT).</summary>
+    /// <remarks><inheritdoc cref="RegisterArray{T}" path="/remarks"/></remarks>
+    public static void RegisterImmutableSortedSet<T>() =>
+        RegisterItems<ImmutableSortedSet<T>, T>(static items => items.ImmutableSortedSetFromStreamAsync);
+
+    /// <summary>Makes <see cref="Dictionary{TKey, TValue}"/> and <see cref="IReadOnlyDictionary{TKey, TValue}"/> serializable without
+    /// reflection (Native AOT).</summary>
+    /// <remarks><inheritdoc cref="RegisterArray{T}" path="/remarks"/></remarks>
+    public static void RegisterDictionary<TKey, TValue>() where TKey : notnull
+    {
+        RegisterEntries<Dictionary<TKey, TValue>, TKey, TValue>(static entries => entries.DictionaryFromStreamAsync);
+        RegisterEntries<IReadOnlyDictionary<TKey, TValue>, TKey, TValue>(static entries => entries.DictionaryFromStreamAsync);
+    }
+
+    /// <summary>Makes <see cref="SortedDictionary{TKey, TValue}"/> serializable without reflection (Native AOT).</summary>
+    /// <remarks><inheritdoc cref="RegisterArray{T}" path="/remarks"/></remarks>
+    public static void RegisterSortedDictionary<TKey, TValue>() where TKey : notnull =>
+        RegisterEntries<SortedDictionary<TKey, TValue>, TKey, TValue>(static entries => entries.SortedDictionaryFromStreamAsync);
+
+    /// <summary>Makes <see cref="SortedList{TKey, TValue}"/> serializable without reflection (Native AOT).</summary>
+    /// <remarks><inheritdoc cref="RegisterArray{T}" path="/remarks"/></remarks>
+    public static void RegisterSortedList<TKey, TValue>() where TKey : notnull =>
+        RegisterEntries<SortedList<TKey, TValue>, TKey, TValue>(static entries => entries.SortedListFromStreamAsync);
+
+    /// <summary>Makes <see cref="ImmutableSortedDictionary{TKey, TValue}"/> serializable without reflection (Native AOT).</summary>
+    /// <remarks><inheritdoc cref="RegisterArray{T}" path="/remarks"/></remarks>
+    public static void RegisterImmutableSortedDictionary<TKey, TValue>() where TKey : notnull =>
+        RegisterEntries<ImmutableSortedDictionary<TKey, TValue>, TKey, TValue>(static entries => entries.ImmutableSortedDictionaryFromStreamAsync);
+
+    /// <summary>Makes <see cref="KeyValuePair{TKey, TValue}"/> serializable without reflection (Native AOT).</summary>
+    /// <remarks><inheritdoc cref="RegisterArray{T}" path="/remarks"/></remarks>
+    public static void RegisterKeyValuePair<TKey, TValue>() =>
+        RegisterAuto(typeof(KeyValuePair<TKey, TValue>), static () => new KeyValuePairSerializer<TKey, TValue>());
+
+    /// <summary>Makes <typeparamref name="T"/>, which implements <see cref="ISerializable"/>, serializable without reflection (Native AOT).</summary>
+    /// <remarks><inheritdoc cref="RegisterArray{T}" path="/remarks"/></remarks>
+    public static void RegisterSerializable<T>() where T : ISerializable, new() =>
+        RegisterAuto(typeof(T), static () => new SerializableTypeSerializer<T>());
+
     private static FrozenDictionary<Type, Lazy<ITypeSerializer>> With(FrozenDictionary<Type, Lazy<ITypeSerializer>> table, Type type, Lazy<ITypeSerializer> serializer) =>
         table.Append(new KeyValuePair<Type, Lazy<ITypeSerializer>>(type, serializer)).ToFrozenDictionary();
 
@@ -206,15 +343,34 @@ public static class Serializer
             throw new ArgumentNullException(nameof(type));
 
         if (type.IsAssignableTo(typeof(ISerializable)))
-            return _serializableTypeSerializers.GetOrAdd(type, static type => new SerializableTypeSerializer(type));
+        {
+            if (Volatile.Read(ref _autoSerializers).TryGetValue(type, out var registered))
+                return registered.Value;
+
+            if (UseReflectionFallback)
+                return _serializableTypeSerializers.GetOrAdd(type, static type => new SerializableTypeSerializer(type));
+
+            // Without reflection a type the generator could not register (no parameterless constructor) may still have a serializer
+            // registered with RegisterSerializer, so the lookup goes on.
+        }
 
         if (Volatile.Read(ref _globalTypeSerializers).TryGetValue(type, out Lazy<ITypeSerializer>? lazySerializer))
             return lazySerializer.Value;
 
-        // A loop, not a query: a lambda capturing the type would be set aside on every lookup, found or not.
+        if (Volatile.Read(ref _autoSerializers).TryGetValue(type, out lazySerializer))
+            return lazySerializer.Value;
+
+        // A loop, not a query: a lambda capturing the type would be set aside on every lookup, found or not. Without reflection the built-in
+        // serializers of collections and key-value pairs are passed over; enums need none, as they go through their underlying type.
+        var useReflection = UseReflectionFallback;
         foreach (var serializer in Volatile.Read(ref _genericSerializers))
+        {
+            if (!useReflection && serializer is CollectionsSerializer or KeyValuePairSerializer)
+                continue;
+
             if (serializer.IsTypeSupported(type))
                 return serializer;
+        }
 
         return null;
     }
@@ -254,16 +410,22 @@ public static class Serializer
         {
             st = Nullable.GetUnderlyingType(st);
             if (st is null)
-                throw new SerializationException($"Cannot find serializer for type '{type}'");
+                throw new SerializationException($"Cannot find serializer for type '{type}'{RegistrationHint(type)}");
 
             serializer = context.FindTypeSerializer(st) ??
-                throw new SerializationException($"Cannot find serializer for type neither '{type}' nor '{st}'");
+                throw new SerializationException($"Cannot find serializer for type neither '{type}' nor '{st}'{RegistrationHint(st)}");
 
             isNullable = true;
         }
 
         return new Resolved(serializer, st, context.AllowNullValues && (type.IsClass || type.IsInterface || isNullable));
     }
+
+    // Where reflection is not used, a generic type nothing registered is refused with what would make it serializable.
+    private static string RegistrationHint(Type type) =>
+        UseReflectionFallback
+            ? string.Empty
+            : $". Reflection is not available (Native AOT): mark the type that holds it with [GenerateSerializer] or register it, e.g. with Serializer.RegisterList<T>(), RegisterDictionary<TKey, TValue>() or RegisterSerializable<T>().";
 
     internal static async ValueTask WriteResolvedAsync<T>(Stream stream, T? value, Resolved resolved, SerializationContext context, CancellationToken cancellationToken)
     {
